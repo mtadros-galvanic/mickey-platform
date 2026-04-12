@@ -1,0 +1,123 @@
+variable "proxmox_api_url" {
+  description = "Proxmox API endpoint."
+  type        = string
+}
+
+variable "proxmox_api_token" {
+  description = "Full Proxmox API token string."
+  type        = string
+  sensitive   = true
+}
+
+variable "proxmox_tls_insecure" {
+  description = "Allow insecure TLS when talking to Proxmox."
+  type        = bool
+  default     = false
+}
+
+variable "proxmox_node_name" {
+  description = "Target Proxmox node name."
+  type        = string
+}
+
+variable "vm_bridge" {
+  description = "Bridge name used by guest network devices."
+  type        = string
+  default     = "vmbr0"
+}
+
+variable "fast_datastore_id" {
+  description = "Datastore used for the control and desktop OS disks."
+  type        = string
+}
+
+variable "cloud_init_datastore_id" {
+  description = "Datastore used for cloud-init media."
+  type        = string
+}
+
+variable "bulk_datastore_id" {
+  description = "Datastore used for the desktop VM data disk."
+  type        = string
+  default     = "bulk"
+}
+
+variable "gateway_ipv4" {
+  description = "IPv4 gateway used by provisioned guests."
+  type        = string
+}
+
+variable "dns_servers" {
+  description = "Recursive DNS servers configured through cloud-init."
+  type        = list(string)
+}
+
+variable "search_domain" {
+  description = "DNS search domain applied through cloud-init."
+  type        = string
+  default     = "galvanic.local"
+}
+
+variable "vm_admin_user" {
+  description = "Bootstrap login user created through cloud-init."
+  type        = string
+  default     = "galvanic"
+}
+
+variable "ssh_public_keys" {
+  description = "SSH public keys injected through cloud-init."
+  type        = list(string)
+}
+
+variable "common_vm_tags" {
+  description = "Tags applied to every VM."
+  type        = list(string)
+  default     = ["terraform", "mickey-platform"]
+}
+
+variable "cpu_type" {
+  description = "CPU type passed to Proxmox."
+  type        = string
+  default     = "host"
+}
+
+variable "ansible_inventory_output_path" {
+  description = "Generated Ansible inventory path."
+  type        = string
+  default     = "../ansible/inventory/hosts.generated.yml"
+}
+
+variable "ansible_ssh_private_key_file" {
+  description = "Private key path used by Ansible after provisioning."
+  type        = string
+  default     = "~/.ssh/mickey"
+}
+
+variable "control_vm" {
+  description = "Control VM definition."
+  type = object({
+    clone_template_name = string
+    name                = string
+    vm_id               = number
+    cpu_cores           = number
+    memory_mb           = number
+    os_disk_gb          = number
+    lan_ipv4_cidr       = string
+    tags                = optional(list(string), [])
+  })
+}
+
+variable "desktop_vm" {
+  description = "Desktop VM definition."
+  type = object({
+    clone_template_name = string
+    name                = string
+    vm_id               = number
+    cpu_cores           = number
+    memory_mb           = number
+    os_disk_gb          = number
+    data_disk_gb        = number
+    lan_ipv4_cidr       = string
+    tags                = optional(list(string), [])
+  })
+}

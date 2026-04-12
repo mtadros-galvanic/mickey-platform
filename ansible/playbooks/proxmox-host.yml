@@ -1,0 +1,208 @@
+---
+- name: Configure Proxmox host baseline and bulk storage
+  hosts: proxmox_hosts
+  become: true
+  gather_facts: true
+
+  vars:
+    mickey_bulk_partition_basename: "{{ mickey_bulk_partition_device | basename }}"
+
+  pre_tasks:
+    - name: Load secrets if provided
+      ansible.builtin.include_vars:
+        file: "{{ secret_vars_file }}"
+      when: secret_vars_file is defined
+
+  tasks:
+    - name: Disable enterprise-only Proxmox repository files on non-subscribed hosts
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: "{{ mickey_proxmox_disabled_repo_files }}"
+
+    - name: Configure the Proxmox no-subscription repository
+      ansible.builtin.copy:
+        dest: "{{ mickey_proxmox_repo_file }}"
+        content: "{{ mickey_proxmox_repo_content }}"
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Configure the Ceph no-subscription repository
+      ansible.builtin.copy:
+        dest: "{{ mickey_ceph_repo_file }}"
+        content: "{{ mickey_ceph_repo_content }}"
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Install packages required for storage provisioning
+      ansible.builtin.apt:
+        name:
+          - e2fsprogs
+          - parted
+          - util-linux
+        state: present
+        update_cache: true
+
+    - name: Confirm the bulk disk device exists
+      ansible.builtin.command: "lsblk -dn -o PATH {{ mickey_bulk_disk_device }}"
+      register: mickey_bulk_disk_probe
+      changed_when: false
+
+    - name: Read the bulk disk model
+      ansible.builtin.command: "lsblk -dn -o MODEL {{ mickey_bulk_disk_device }}"
+      register: mickey_bulk_disk_model
+      changed_when: false
+
+    - name: Fail when the bulk disk model does not match expectations
+      ansible.builtin.fail:
+        msg: >-
+          Refusing to touch {{ mickey_bulk_disk_device }} because its model is
+          '{{ mickey_bulk_disk_model.stdout | trim }}', expected
+          '{{ mickey_bulk_disk_expected_model }}'.
+      when:
+        - mickey_bulk_disk_expected_model is defined
+        - mickey_bulk_disk_expected_model | trim != ""
+        - mickey_bulk_disk_model.stdout | trim != mickey_bulk_disk_expected_model
+
+    - name: Inspect the bulk disk partition table
+      ansible.builtin.command: "parted -s {{ mickey_bulk_disk_device }} print"
+      register: mickey_bulk_parted_print
+      changed_when: false
+      failed_when: false
+
+    - name: Inspect existing bulk disk partitions
+      ansible.builtin.shell: |
+        lsblk -nrpo NAME,TYPE {{ mickey_bulk_disk_device }} | awk '$2 == "part" { print $1 }'
+      args:
+        executable: /bin/bash
+      register: mickey_bulk_partition_paths
+      changed_when: false
+
+    - name: Detect the filesystem on the bulk partition
+      ansible.builtin.command: "blkid -o value -s TYPE {{ mickey_bulk_partition_device }}"
+      register: mickey_bulk_fs_type
+      changed_when: false
+      failed_when: false
+
+    - name: Inspect the current bulk mount
+      ansible.builtin.command: "findmnt -n -o SOURCE --target {{ mickey_bulk_mount_path }}"
+      register: mickey_bulk_mount_source
+      changed_when: false
+      failed_when: false
+
+    - name: Inspect existing Proxmox storage definitions
+      ansible.builtin.command: pvesm status
+      register: mickey_pvesm_status
+      changed_when: false
+
+    - name: Derive the current bulk storage state
+      ansible.builtin.set_fact:
+        mickey_bulk_partition_layout_ok: >-
+          {{
+            ('Partition Table: gpt' in mickey_bulk_parted_print.stdout)
+            and (mickey_bulk_partition_paths.stdout_lines | default([]) == [mickey_bulk_partition_device])
+          }}
+        mickey_bulk_partition_fs_ok: "{{ mickey_bulk_fs_type.stdout | trim == 'ext4' }}"
+        mickey_bulk_mount_ok: "{{ mickey_bulk_mount_source.stdout | trim == mickey_bulk_partition_device }}"
+        mickey_bulk_storage_registered: "{{ mickey_bulk_storage_name in mickey_pvesm_status.stdout }}"
+
+    - name: Decide whether the bulk disk must be repartitioned
+      ansible.builtin.set_fact:
+        mickey_bulk_requires_repartition: >-
+          {{
+            (not mickey_bulk_partition_layout_ok)
+            or (not mickey_bulk_partition_fs_ok)
+          }}
+
+    - name: Refuse to repartition the bulk disk without an explicit confirmation
+      ansible.builtin.fail:
+        msg: >-
+          Refusing to repartition {{ mickey_bulk_disk_device }}. Re-run with
+          mickey_bulk_disk_wipe_confirm=true after confirming backups are safe.
+      when:
+        - mickey_bulk_requires_repartition
+        - not (mickey_bulk_disk_wipe_confirm | bool)
+
+    - name: Wipe and recreate the bulk disk layout
+      when: mickey_bulk_requires_repartition
+      block:
+        - name: Wipe signatures from existing child partitions
+          ansible.builtin.shell: |
+            lsblk -nrpo NAME,TYPE {{ mickey_bulk_disk_device }} | awk '$2 == "part" { print $1 }' | xargs -r -n1 wipefs -af
+          args:
+            executable: /bin/bash
+          changed_when: true
+
+        - name: Wipe signatures from the bulk disk
+          ansible.builtin.command: "wipefs -af {{ mickey_bulk_disk_device }}"
+
+        - name: Create the new GPT partition layout
+          ansible.builtin.command: >-
+            parted -s {{ mickey_bulk_disk_device }}
+            mklabel gpt
+            mkpart primary ext4 1MiB 100%
+
+        - name: Re-read the bulk disk partition table
+          ansible.builtin.command: "partprobe {{ mickey_bulk_disk_device }}"
+
+        - name: Wait for partition device nodes to settle
+          ansible.builtin.command: udevadm settle
+
+    - name: Re-check the bulk filesystem after any repartition
+      ansible.builtin.command: "blkid -o value -s TYPE {{ mickey_bulk_partition_device }}"
+      register: mickey_bulk_fs_type_post
+      changed_when: false
+      failed_when: false
+
+    - name: Create the ext4 filesystem on the bulk partition
+      ansible.builtin.command: "mkfs.ext4 -F -L {{ mickey_bulk_filesystem_label }} {{ mickey_bulk_partition_device }}"
+      when: mickey_bulk_fs_type_post.stdout | trim != "ext4"
+
+    - name: Ensure the bulk mount path exists
+      ansible.builtin.file:
+        path: "{{ mickey_bulk_mount_path }}"
+        state: directory
+        mode: "0755"
+
+    - name: Fail when the bulk mount path is occupied by a different source
+      ansible.builtin.fail:
+        msg: >-
+          {{ mickey_bulk_mount_path }} is already mounted from
+          {{ mickey_bulk_mount_source.stdout | trim }}, expected
+          {{ mickey_bulk_partition_device }}.
+      when:
+        - mickey_bulk_mount_source.stdout | trim != ""
+        - mickey_bulk_mount_source.stdout | trim != mickey_bulk_partition_device
+
+    - name: Read the bulk partition UUID
+      ansible.builtin.command: "blkid -o value -s UUID {{ mickey_bulk_partition_device }}"
+      register: mickey_bulk_uuid
+      changed_when: false
+
+    - name: Persist the bulk mount in fstab
+      ansible.builtin.lineinfile:
+        path: /etc/fstab
+        regexp: "^UUID=.*\\s+{{ mickey_bulk_mount_path | regex_escape() }}\\s"
+        line: "UUID={{ mickey_bulk_uuid.stdout | trim }} {{ mickey_bulk_mount_path }} ext4 defaults,noatime 0 2"
+
+    - name: Mount the bulk filesystem
+      ansible.builtin.shell: |
+        if mountpoint -q {{ mickey_bulk_mount_path }}; then
+          echo mounted
+        else
+          mount {{ mickey_bulk_mount_path }}
+          echo changed
+        fi
+      args:
+        executable: /bin/bash
+      register: mickey_bulk_mount_result
+      changed_when: "'changed' in mickey_bulk_mount_result.stdout"
+
+    - name: Register the bulk Proxmox directory storage
+      ansible.builtin.command: >
+        pvesm add dir {{ mickey_bulk_storage_name }}
+        --path {{ mickey_bulk_mount_path }}
+        --content {{ mickey_bulk_storage_content }}
+      when: mickey_bulk_storage_name not in mickey_pvesm_status.stdout

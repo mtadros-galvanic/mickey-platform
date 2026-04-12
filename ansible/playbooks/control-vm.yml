@@ -1,0 +1,84 @@
+---
+- name: Bootstrap the Mickey control VM
+  hosts: control_vms
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Load secrets if provided
+      ansible.builtin.include_vars:
+        file: "{{ secret_vars_file }}"
+      when: secret_vars_file is defined
+
+  tasks:
+    - name: Install baseline automation packages
+      ansible.builtin.apt:
+        name: "{{ mickey_control_apt_packages }}"
+        state: present
+        update_cache: true
+
+    - name: Check whether Terraform is already installed
+      ansible.builtin.stat:
+        path: /usr/local/bin/terraform
+      register: mickey_terraform_bin
+
+    - name: Read the installed Terraform version
+      ansible.builtin.command: /usr/local/bin/terraform version -json
+      register: mickey_terraform_version_info
+      changed_when: false
+      when: mickey_terraform_bin.stat.exists
+
+    - name: Decide whether Terraform needs to be installed
+      ansible.builtin.set_fact:
+        mickey_install_terraform: "{{ (not mickey_terraform_bin.stat.exists) or ((mickey_terraform_version_info.stdout | from_json).terraform_version != mickey_terraform_version) }}"
+
+    - name: Download Terraform
+      ansible.builtin.get_url:
+        url: "https://releases.hashicorp.com/terraform/{{ mickey_terraform_version }}/terraform_{{ mickey_terraform_version }}_linux_amd64.zip"
+        dest: /tmp/terraform.zip
+        mode: "0644"
+      when: mickey_install_terraform
+
+    - name: Install Terraform
+      ansible.builtin.unarchive:
+        src: /tmp/terraform.zip
+        dest: /usr/local/bin
+        remote_src: true
+        mode: "0755"
+      when: mickey_install_terraform
+
+    - name: Check whether SOPS is already installed
+      ansible.builtin.stat:
+        path: /usr/local/bin/sops
+      register: mickey_sops_bin
+
+    - name: Read the installed SOPS version
+      ansible.builtin.command: /usr/local/bin/sops --version
+      register: mickey_sops_version_info
+      changed_when: false
+      when: mickey_sops_bin.stat.exists
+
+    - name: Decide whether SOPS needs to be installed
+      ansible.builtin.set_fact:
+        mickey_install_sops: "{{ (not mickey_sops_bin.stat.exists) or ('sops ' ~ mickey_sops_version) not in mickey_sops_version_info.stdout }}"
+
+    - name: Install SOPS
+      ansible.builtin.get_url:
+        url: "https://github.com/getsops/sops/releases/download/v{{ mickey_sops_version }}/sops-v{{ mickey_sops_version }}.linux.amd64"
+        dest: /usr/local/bin/sops
+        mode: "0755"
+      when: mickey_install_sops
+
+    - name: Ensure the bootstrap user has the configured password
+      ansible.builtin.user:
+        name: "{{ mickey_guest_admin_user }}"
+        password: "{{ guests.control_admin_password_hash }}"
+      when:
+        - guests is defined
+        - guests.control_admin_password_hash is defined
+
+    - name: Enable the guest agent
+      ansible.builtin.service:
+        name: qemu-guest-agent
+        state: started
+        enabled: true

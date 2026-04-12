@@ -1,0 +1,19 @@
+[global]
+   workgroup = {{ mickey_desktop_share_workgroup }}
+   server role = standalone server
+   map to guest = never
+   security = user
+   obey pam restrictions = yes
+   pam password change = no
+   unix password sync = no
+   log file = /var/log/samba/%m.log
+   max log size = 1000
+
+[{{ mickey_desktop_share_name }}]
+   path = {{ mickey_desktop_share_mount_path }}
+   browseable = yes
+   read only = no
+   guest ok = no
+   valid users = {{ mickey_samba_username }}
+   create mask = 0660
+   directory mask = 0770

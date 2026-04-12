@@ -1,0 +1,183 @@
+---
+- name: Bootstrap the Mickey main desktop VM
+  hosts: desktop_vms
+  become: true
+  gather_facts: true
+
+  vars:
+    mickey_samba_username: "{{ (samba.username | default(mickey_guest_admin_user)) if (samba is defined) else mickey_guest_admin_user }}"
+
+  pre_tasks:
+    - name: Load secrets if provided
+      ansible.builtin.include_vars:
+        file: "{{ secret_vars_file }}"
+      when: secret_vars_file is defined
+
+  handlers:
+    - name: Restart smbd
+      ansible.builtin.service:
+        name: smbd
+        state: restarted
+
+  tasks:
+    - name: Install desktop baseline packages
+      ansible.builtin.apt:
+        name: "{{ mickey_desktop_apt_packages }}"
+        state: present
+        update_cache: true
+
+    - name: Ensure the bootstrap user has the configured desktop password
+      ansible.builtin.user:
+        name: "{{ mickey_guest_admin_user }}"
+        password: "{{ guests.desktop_admin_password_hash }}"
+      when:
+        - guests is defined
+        - guests.desktop_admin_password_hash is defined
+
+    - name: Add the bootstrap user to the docker group
+      ansible.builtin.user:
+        name: "{{ mickey_guest_admin_user }}"
+        groups: docker
+        append: true
+
+    - name: Enable guest-facing services
+      ansible.builtin.service:
+        name: "{{ item }}"
+        state: started
+        enabled: true
+      loop:
+        - docker
+        - qemu-guest-agent
+        - smbd
+        - xrdp
+
+    - name: Detect the root filesystem source
+      ansible.builtin.command: findmnt -n -o SOURCE /
+      register: mickey_root_source
+      changed_when: false
+
+    - name: Detect the root parent disk
+      ansible.builtin.command: "lsblk -no pkname {{ mickey_root_source.stdout | trim }}"
+      register: mickey_root_parent_disk
+      changed_when: false
+
+    - name: Detect non-root block disk candidates
+      ansible.builtin.shell: |
+        lsblk -dn -o NAME,TYPE | awk '$2 == "disk" { print $1 }' | grep -vx "{{ mickey_root_parent_disk.stdout | trim }}"
+      args:
+        executable: /bin/bash
+      register: mickey_data_disk_candidates
+      changed_when: false
+      failed_when: false
+
+    - name: Fail when the desktop data disk cannot be identified uniquely
+      ansible.builtin.fail:
+        msg: "Expected exactly one non-root disk for the desktop data volume, found: {{ mickey_data_disk_candidates.stdout_lines | default([]) }}"
+      when: (mickey_data_disk_candidates.stdout_lines | default([]) | length) != 1
+
+    - name: Set the desktop data disk path
+      ansible.builtin.set_fact:
+        mickey_desktop_data_disk_device: "/dev/{{ mickey_data_disk_candidates.stdout_lines[0] }}"
+        mickey_desktop_data_partition_device: "/dev/{{ mickey_data_disk_candidates.stdout_lines[0] }}1"
+
+    - name: Inspect the desktop data disk partition table
+      ansible.builtin.command: "parted -s {{ mickey_desktop_data_disk_device }} print"
+      register: mickey_desktop_parted_print
+      changed_when: false
+      failed_when: false
+
+    - name: Create a GPT label on the desktop data disk
+      ansible.builtin.command: "parted -s {{ mickey_desktop_data_disk_device }} mklabel gpt"
+      when: "'Partition Table: gpt' not in mickey_desktop_parted_print.stdout"
+
+    - name: Create the desktop data partition when missing
+      ansible.builtin.shell: |
+        if lsblk {{ mickey_desktop_data_partition_device }} >/dev/null 2>&1; then
+          echo present
+        else
+          parted -s {{ mickey_desktop_data_disk_device }} mkpart primary ext4 1MiB 100%
+          echo created
+        fi
+      args:
+        executable: /bin/bash
+      register: mickey_desktop_partition_create
+      changed_when: "'created' in mickey_desktop_partition_create.stdout"
+
+    - name: Detect the filesystem on the desktop data partition
+      ansible.builtin.command: "blkid -o value -s TYPE {{ mickey_desktop_data_partition_device }}"
+      register: mickey_desktop_fs_type
+      changed_when: false
+      failed_when: false
+
+    - name: Create the ext4 filesystem on the desktop data partition
+      ansible.builtin.command: "mkfs.ext4 -F -L mickey-share {{ mickey_desktop_data_partition_device }}"
+      when: mickey_desktop_fs_type.stdout | trim != "ext4"
+
+    - name: Ensure the share mount path exists
+      ansible.builtin.file:
+        path: "{{ mickey_desktop_share_mount_path }}"
+        state: directory
+        mode: "0770"
+
+    - name: Read the desktop data partition UUID
+      ansible.builtin.command: "blkid -o value -s UUID {{ mickey_desktop_data_partition_device }}"
+      register: mickey_desktop_uuid
+      changed_when: false
+
+    - name: Persist the share mount in fstab
+      ansible.builtin.lineinfile:
+        path: /etc/fstab
+        regexp: "^UUID=.*\\s+{{ mickey_desktop_share_mount_path | regex_escape() }}\\s"
+        line: "UUID={{ mickey_desktop_uuid.stdout | trim }} {{ mickey_desktop_share_mount_path }} ext4 defaults,noatime 0 2"
+
+    - name: Mount the desktop share filesystem
+      ansible.builtin.shell: |
+        if mountpoint -q {{ mickey_desktop_share_mount_path }}; then
+          echo mounted
+        else
+          mount {{ mickey_desktop_share_mount_path }}
+          echo changed
+        fi
+      args:
+        executable: /bin/bash
+      register: mickey_desktop_mount_result
+      changed_when: "'changed' in mickey_desktop_mount_result.stdout"
+
+    - name: Ensure the Samba user exists as a local account
+      ansible.builtin.user:
+        name: "{{ mickey_samba_username }}"
+        groups: sambashare
+        append: true
+
+    - name: Ensure the share path has the expected ownership
+      ansible.builtin.file:
+        path: "{{ mickey_desktop_share_mount_path }}"
+        state: directory
+        owner: "{{ mickey_samba_username }}"
+        group: sambashare
+        mode: "0770"
+
+    - name: Install the Samba configuration
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/smb.conf.j2"
+        dest: /etc/samba/smb.conf
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart smbd
+
+    - name: Configure the Samba password
+      ansible.builtin.shell: |
+        export SAMBA_PASSWORD={{ samba.password | quote }}
+        if pdbedit -L -u {{ mickey_samba_username }} >/dev/null 2>&1; then
+          printf '%s\n%s\n' "$SAMBA_PASSWORD" "$SAMBA_PASSWORD" | smbpasswd -s {{ mickey_samba_username }}
+        else
+          printf '%s\n%s\n' "$SAMBA_PASSWORD" "$SAMBA_PASSWORD" | smbpasswd -s -a {{ mickey_samba_username }}
+        fi
+        smbpasswd -e {{ mickey_samba_username }} >/dev/null 2>&1 || true
+      args:
+        executable: /bin/bash
+      when:
+        - samba is defined
+        - samba.password is defined
+      changed_when: false
