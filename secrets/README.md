@@ -16,7 +16,9 @@ The secrets file is split into three namespaces:
 - `terraform`
   - Proxmox API endpoint and token
 - `guests`
-  - SSH keys and password hashes for the bootstrap user
+  - SSH keys plus password hashes for the bootstrap login user
+  - `extra_vm_admin_password_hash` is passed to cloud-init for additional VMs such as `mickey-thud`
+  - role-specific hashes remain available for the control and desktop Ansible playbooks
 - `samba`
   - Samba username and password for the desktop VM share
 

@@ -6,10 +6,17 @@ ANSIBLE_GENERATED_INVENTORY ?= $(ROOT)ansible/inventory/hosts.generated.yml
 WIPE_CONFIRM ?= false
 HOST_ANSIBLE_EXTRA_VARS ?=
 
-.PHONY: templates tf-init tf-plan tf-apply ansible-host ansible-control ansible-desktop
+.PHONY: templates templates-bionic tf-init tf-plan tf-apply ansible-host ansible-control ansible-desktop ansible-build
 
 templates:
 	"$(ROOT)scripts/build-proxmox-templates.sh"
+
+templates-bionic:
+	TEMPLATE_ID=9002 \
+	TEMPLATE_NAME=ubuntu-18-04-server-cloudinit \
+	CLOUD_IMAGE_FILE_NAME=ubuntu-18.04-server-cloudimg-amd64.qcow2 \
+	UBUNTU_CLOUD_IMAGE_URL=https://cloud-images.ubuntu.com/releases/bionic/release/ubuntu-18.04-server-cloudimg-amd64.img \
+	"$(ROOT)scripts/build-proxmox-template-via-api.sh"
 
 tf-init:
 	terraform -chdir="$(ROOT)terraform" init
@@ -28,3 +35,6 @@ ansible-control:
 
 ansible-desktop:
 	"$(ROOT)scripts/run-ansible.sh" "$(ROOT)ansible/playbooks/desktop-vm.yml" "$(ANSIBLE_BASE_INVENTORY)" "$(ANSIBLE_GENERATED_INVENTORY)"
+
+ansible-build:
+	"$(ROOT)scripts/run-ansible.sh" "$(ROOT)ansible/playbooks/build-vm.yml" "$(ANSIBLE_BASE_INVENTORY)" "$(ANSIBLE_GENERATED_INVENTORY)"

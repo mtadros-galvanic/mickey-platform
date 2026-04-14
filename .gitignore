@@ -22,3 +22,8 @@ secrets/*.plain.yml
 secrets/*.plain.json
 
 .DS_Store
+
+ansible/files/ssh/**
+!ansible/files/ssh/**/
+!ansible/files/ssh/**/.gitignore
+!ansible/files/ssh/**/config

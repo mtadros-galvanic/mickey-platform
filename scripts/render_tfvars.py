@@ -25,6 +25,9 @@ def main() -> int:
         "ssh_public_keys": guests["ssh_public_keys"],
     }
 
+    if guests.get("extra_vm_admin_password_hash"):
+        tfvars["extra_vm_admin_password_hash"] = guests["extra_vm_admin_password_hash"]
+
     json.dump(tfvars, sys.stdout, indent=2, sort_keys=True)
     sys.stdout.write("\n")
     return 0

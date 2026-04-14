@@ -2,3 +2,4 @@
 - import_playbook: proxmox-host.yml
 - import_playbook: control-vm.yml
 - import_playbook: desktop-vm.yml
+- import_playbook: build-vm.yml

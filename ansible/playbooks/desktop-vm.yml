@@ -5,6 +5,7 @@
   gather_facts: true
 
   vars:
+    mickey_guest_admin_password_hash: "{{ guests.desktop_admin_password_hash | default('') if (guests is defined) else '' }}"
     mickey_samba_username: "{{ (samba.username | default(mickey_guest_admin_user)) if (samba is defined) else mickey_guest_admin_user }}"
 
   pre_tasks:
@@ -26,13 +27,8 @@
         state: present
         update_cache: true
 
-    - name: Ensure the bootstrap user has the configured desktop password
-      ansible.builtin.user:
-        name: "{{ mickey_guest_admin_user }}"
-        password: "{{ guests.desktop_admin_password_hash }}"
-      when:
-        - guests is defined
-        - guests.desktop_admin_password_hash is defined
+    - name: Ensure the bootstrap user is configured
+      ansible.builtin.include_tasks: ../tasks/bootstrap-admin-user.yml
 
     - name: Add the bootstrap user to the docker group
       ansible.builtin.user:

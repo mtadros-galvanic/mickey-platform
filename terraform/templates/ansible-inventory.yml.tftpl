@@ -10,17 +10,10 @@ all:
           ansible_ssh_common_args: -o IdentitiesOnly=yes
           mickey_vm_role: ${host.role}
 %{ endfor ~}
-    control_vms:
+%{ for group_name in group_names ~}
+    ${group_name}:
       hosts:
-%{ for host_key, host in hosts ~}
-%{ if host.role == "control" ~}
+%{ for host_key in groups[group_name] ~}
         ${host_key}: {}
-%{ endif ~}
 %{ endfor ~}
-    desktop_vms:
-      hosts:
-%{ for host_key, host in hosts ~}
-%{ if host.role == "desktop" ~}
-        ${host_key}: {}
-%{ endif ~}
 %{ endfor ~}

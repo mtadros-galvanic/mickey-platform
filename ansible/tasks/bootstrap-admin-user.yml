@@ -1,0 +1,54 @@
+---
+- name: Build the bootstrap user's authorized key set
+  ansible.builtin.set_fact:
+    mickey_guest_authorized_keys: >-
+      {{
+        (
+          (guests.ssh_public_keys | default([]))
+          +
+          (
+            (
+              lookup(
+                'ansible.builtin.file',
+                (playbook_dir | dirname) ~ '/files/authorized_keys/' ~ inventory_hostname,
+                errors='ignore'
+              )
+              | default('', true)
+            ).splitlines()
+            | map('trim')
+            | reject('equalto', '')
+            | list
+          )
+        )
+        | unique
+      }}
+
+- name: Ensure the bootstrap user exists
+  ansible.builtin.user:
+    name: "{{ mickey_guest_admin_user }}"
+    state: present
+    create_home: true
+
+- name: Ensure the bootstrap user has the configured password
+  ansible.builtin.user:
+    name: "{{ mickey_guest_admin_user }}"
+    password: "{{ mickey_guest_admin_password_hash }}"
+  when: mickey_guest_admin_password_hash is defined and (mickey_guest_admin_password_hash | length) > 0
+
+- name: Ensure the bootstrap user's SSH directory exists
+  ansible.builtin.file:
+    path: "/home/{{ mickey_guest_admin_user }}/.ssh"
+    state: directory
+    owner: "{{ mickey_guest_admin_user }}"
+    group: "{{ mickey_guest_admin_user }}"
+    mode: "0700"
+
+- name: Ensure the bootstrap user's authorized_keys matches the configured key set
+  ansible.builtin.copy:
+    dest: "/home/{{ mickey_guest_admin_user }}/.ssh/authorized_keys"
+    content: "{{ (mickey_guest_authorized_keys | join('\n')) ~ '\n' }}"
+    owner: "{{ mickey_guest_admin_user }}"
+    group: "{{ mickey_guest_admin_user }}"
+    mode: "0600"
+  when:
+    - (mickey_guest_authorized_keys | length) > 0

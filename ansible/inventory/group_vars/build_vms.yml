@@ -1,0 +1,29 @@
+mickey_build_apt_packages:
+  - ca-certificates
+  - curl
+  - git
+  - openssh-server
+  - qemu-guest-agent
+  - xz-utils
+
+mickey_build_node_version: "16.20.2"
+mickey_build_node_arch: "linux-x64"
+mickey_build_node_archive_name: "node-v{{ mickey_build_node_version }}-{{ mickey_build_node_arch }}"
+mickey_build_node_install_root: "/home/{{ mickey_guest_admin_user }}/.local/opt"
+mickey_build_node_install_dir: "{{ mickey_build_node_install_root }}/{{ mickey_build_node_archive_name }}"
+mickey_build_node_archive_url: "https://nodejs.org/dist/v{{ mickey_build_node_version }}/{{ mickey_build_node_archive_name }}.tar.xz"
+mickey_build_local_bin_dir: "/home/{{ mickey_guest_admin_user }}/.local/bin"
+
+mickey_build_codex_package: "@openai/codex"
+mickey_build_codex_version: "0.120.0"
+mickey_build_enable_codex: true
+
+mickey_build_enable_repo_clones: true
+mickey_build_repo_root: "/home/{{ mickey_guest_admin_user }}/Projects"
+mickey_build_git_repos:
+  - name: "accuchrome-gc5-wl"
+    url: "git@github.com:GalvanicAppliedSciences/accuchrome-gc5-wl.git"
+  - name: "Acculase6"
+    url: "git@github.com:GalvanicAppliedSciences/Acculase6.git"
+  - name: "Yocto-Thud-Documentation"
+    url: "git@github.com:GalvanicAppliedSciences/Yocto-Thud-Documentation.git"

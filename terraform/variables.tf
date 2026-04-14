@@ -27,7 +27,7 @@ variable "vm_bridge" {
 }
 
 variable "fast_datastore_id" {
-  description = "Datastore used for the control and desktop OS disks."
+  description = "Datastore used for fast guest disks."
   type        = string
 }
 
@@ -37,7 +37,7 @@ variable "cloud_init_datastore_id" {
 }
 
 variable "bulk_datastore_id" {
-  description = "Datastore used for the desktop VM data disk."
+  description = "Datastore used for large-capacity guest disks."
   type        = string
   default     = "bulk"
 }
@@ -62,6 +62,13 @@ variable "vm_admin_user" {
   description = "Bootstrap login user created through cloud-init."
   type        = string
   default     = "galvanic"
+}
+
+variable "extra_vm_admin_password_hash" {
+  description = "Optional password hash applied to additional VMs only."
+  type        = string
+  default     = null
+  sensitive   = true
 }
 
 variable "ssh_public_keys" {
@@ -96,28 +103,58 @@ variable "ansible_ssh_private_key_file" {
 variable "control_vm" {
   description = "Control VM definition."
   type = object({
-    clone_template_name = string
-    name                = string
-    vm_id               = number
-    cpu_cores           = number
-    memory_mb           = number
-    os_disk_gb          = number
-    lan_ipv4_cidr       = string
-    tags                = optional(list(string), [])
+    clone_template_name  = string
+    name                 = string
+    vm_id                = number
+    cpu_cores            = number
+    memory_mb            = number
+    os_disk_gb           = number
+    os_disk_datastore_id = optional(string)
+    lan_ipv4_cidr        = string
+    started              = optional(bool, true)
+    on_boot              = optional(bool, true)
+    tags                 = optional(list(string), [])
   })
 }
 
 variable "desktop_vm" {
   description = "Desktop VM definition."
   type = object({
-    clone_template_name = string
-    name                = string
-    vm_id               = number
-    cpu_cores           = number
-    memory_mb           = number
-    os_disk_gb          = number
-    data_disk_gb        = number
-    lan_ipv4_cidr       = string
-    tags                = optional(list(string), [])
+    clone_template_name  = string
+    name                 = string
+    vm_id                = number
+    cpu_cores            = number
+    memory_mb            = number
+    os_disk_gb           = number
+    os_disk_datastore_id = optional(string)
+    data_disk_gb         = number
+    lan_ipv4_cidr        = string
+    started              = optional(bool, true)
+    on_boot              = optional(bool, true)
+    tags                 = optional(list(string), [])
   })
+}
+
+variable "extra_vms" {
+  description = "Additional VM definitions."
+  type = map(object({
+    clone_template_name  = string
+    name                 = string
+    role                 = optional(string, "extra")
+    vm_id                = number
+    cpu_cores            = number
+    memory_mb            = number
+    os_disk_gb           = number
+    os_disk_datastore_id = optional(string)
+    lan_ipv4_cidr        = string
+    started              = optional(bool, true)
+    on_boot              = optional(bool, true)
+    tags                 = optional(list(string), [])
+    extra_disks = optional(list(object({
+      datastore_id = string
+      interface    = string
+      size_gb      = number
+    })), [])
+  }))
+  default = {}
 }

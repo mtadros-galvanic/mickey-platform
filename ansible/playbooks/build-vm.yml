@@ -1,0 +1,222 @@
+---
+- name: Bootstrap the Mickey build VMs
+  hosts: build_vms
+  become: true
+  gather_facts: false
+
+  pre_tasks:
+    - name: Load secrets if provided
+      ansible.builtin.include_vars:
+        file: "{{ secret_vars_file }}"
+      when: secret_vars_file is defined
+
+    - name: Build the bootstrap user's authorized key set
+      ansible.builtin.set_fact:
+        mickey_guest_authorized_keys: >-
+          {{
+            (
+              (guests.ssh_public_keys | default([]))
+              +
+              (
+                (
+                  lookup(
+                    'ansible.builtin.file',
+                    (playbook_dir | dirname) ~ '/files/authorized_keys/' ~ inventory_hostname,
+                    errors='ignore'
+                  )
+                  | default('', true)
+                ).splitlines()
+                | map('trim')
+                | reject('equalto', '')
+                | list
+              )
+            )
+            | unique
+          }}
+
+    - name: Build the Codex package spec
+      ansible.builtin.set_fact:
+        mickey_build_codex_package_spec: >-
+          {{
+            mickey_build_codex_package
+            ~
+            (
+              ('@' ~ mickey_build_codex_version)
+              if (mickey_build_codex_version is defined and (mickey_build_codex_version | length) > 0)
+              else ''
+            )
+          }}
+      when: mickey_build_enable_codex | default(false) | bool
+
+    - name: Discover optional guest SSH bundle files
+      ansible.builtin.set_fact:
+        mickey_guest_ssh_bundle_files: []
+        mickey_guest_ssh_bundle_paths: >-
+          {{
+            lookup(
+              'ansible.builtin.fileglob',
+              ((playbook_dir | dirname) ~ '/files/ssh/' ~ inventory_hostname ~ '/*'),
+              wantlist=True
+            )
+            | reject('search', '/\\.gitignore$')
+            | reject('search', '\\.pub$')
+            | list
+          }}
+
+    - name: Load optional guest SSH bundle file payloads
+      ansible.builtin.set_fact:
+        mickey_guest_ssh_bundle_files: >-
+          {{
+            mickey_guest_ssh_bundle_files
+            +
+            [
+              {
+                'name': (item | basename),
+                'content': (lookup('ansible.builtin.file', item, errors='ignore') | default('', true))
+              }
+            ]
+          }}
+      loop: "{{ mickey_guest_ssh_bundle_paths }}"
+      when: (mickey_guest_ssh_bundle_paths | length) > 0
+      no_log: true
+
+  tasks:
+    - name: Install build VM baseline packages
+      ansible.builtin.raw: |
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update
+        apt-get install -y {{ mickey_build_apt_packages | join(' ') }}
+
+    - name: Ensure the bootstrap user has the configured password
+      ansible.builtin.raw: |
+        usermod --password {{ guests.extra_vm_admin_password_hash | quote }} {{ mickey_guest_admin_user | quote }}
+      when:
+        - guests is defined
+        - guests.extra_vm_admin_password_hash is defined
+        - (guests.extra_vm_admin_password_hash | length) > 0
+
+    - name: Ensure the bootstrap user's authorized_keys matches the configured key set
+      ansible.builtin.raw: |
+        install -d -m 0700 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} /home/{{ mickey_guest_admin_user }}/.ssh
+        cat > /home/{{ mickey_guest_admin_user }}/.ssh/authorized_keys <<'EOF'
+        {% for ssh_key in mickey_guest_authorized_keys %}
+        {{ ssh_key }}
+        {% endfor %}
+        EOF
+        chown {{ mickey_guest_admin_user | quote }}:{{ mickey_guest_admin_user | quote }} /home/{{ mickey_guest_admin_user }}/.ssh/authorized_keys
+        chmod 0600 /home/{{ mickey_guest_admin_user }}/.ssh/authorized_keys
+      when:
+        - (mickey_guest_authorized_keys | length) > 0
+
+    - name: Ensure optional SSH bundle files are present for the bootstrap user
+      ansible.builtin.raw: |
+        install -d -m 0700 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} /home/{{ mickey_guest_admin_user }}/.ssh
+        cat > /home/{{ mickey_guest_admin_user }}/.ssh/{{ item.name | quote }} <<'EOF'
+        {{ item.content }}
+        EOF
+        chown {{ mickey_guest_admin_user | quote }}:{{ mickey_guest_admin_user | quote }} /home/{{ mickey_guest_admin_user }}/.ssh/{{ item.name | quote }}
+        chmod 0600 /home/{{ mickey_guest_admin_user }}/.ssh/{{ item.name | quote }}
+      loop: "{{ mickey_guest_ssh_bundle_files }}"
+      when: (mickey_guest_ssh_bundle_files | length) > 0
+      no_log: true
+
+    - name: Remove public key reference files from the bootstrap user's SSH bundle
+      ansible.builtin.raw: |
+        install -d -m 0700 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} /home/{{ mickey_guest_admin_user }}/.ssh
+        find /home/{{ mickey_guest_admin_user }}/.ssh -maxdepth 1 -type f -name '*.pub' -delete
+      changed_when: false
+
+    - name: Remove stale GitLab-specific SSH bundle files from the bootstrap user's SSH directory
+      ansible.builtin.raw: |
+        rm -f /home/{{ mickey_guest_admin_user }}/.ssh/john-gitlab /home/{{ mickey_guest_admin_user }}/.ssh/gitlab.ibeeto
+      changed_when: false
+
+    - name: Ensure GitHub is trusted for SSH repo access
+      ansible.builtin.raw: |
+        install -d -m 0700 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} /home/{{ mickey_guest_admin_user }}/.ssh
+        touch /home/{{ mickey_guest_admin_user }}/.ssh/known_hosts
+        chown {{ mickey_guest_admin_user | quote }}:{{ mickey_guest_admin_user | quote }} /home/{{ mickey_guest_admin_user }}/.ssh/known_hosts
+        chmod 0600 /home/{{ mickey_guest_admin_user }}/.ssh/known_hosts
+        if ! ssh-keygen -F github.com -f /home/{{ mickey_guest_admin_user }}/.ssh/known_hosts >/dev/null 2>&1; then
+          ssh-keyscan -H github.com >> /home/{{ mickey_guest_admin_user }}/.ssh/known_hosts
+        fi
+      changed_when: false
+
+    - name: Ensure build tooling directories exist
+      ansible.builtin.raw: |
+        install -d -m 0755 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} /home/{{ mickey_guest_admin_user }}/.local
+        install -d -m 0755 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} {{ mickey_build_local_bin_dir | quote }}
+        install -d -m 0755 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} {{ mickey_build_node_install_root | quote }}
+        install -d -m 0755 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} /home/{{ mickey_guest_admin_user }}/.local/lib
+        install -d -m 0755 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} {{ mickey_build_repo_root | quote }}
+
+    - name: Install the pinned Node.js runtime for build tooling
+      ansible.builtin.raw: |
+        set -eu
+        archive="/tmp/{{ mickey_build_node_archive_name }}.tar.xz"
+        if [ "$({{ mickey_build_node_install_dir }}/bin/node -v 2>/dev/null || true)" != "v{{ mickey_build_node_version }}" ]; then
+          rm -rf {{ mickey_build_node_install_dir | quote }}
+          curl -fsSL {{ mickey_build_node_archive_url | quote }} -o "$archive"
+          tar -xJf "$archive" -C {{ mickey_build_node_install_root | quote }}
+          chown -R {{ mickey_guest_admin_user | quote }}:{{ mickey_guest_admin_user | quote }} {{ mickey_build_node_install_dir | quote }}
+          rm -f "$archive"
+        fi
+        ln -sfn {{ mickey_build_node_install_dir }}/bin/node {{ mickey_build_local_bin_dir }}/node
+        ln -sfn {{ mickey_build_node_install_dir }}/bin/npm {{ mickey_build_local_bin_dir }}/npm
+        ln -sfn {{ mickey_build_node_install_dir }}/bin/npx {{ mickey_build_local_bin_dir }}/npx
+        ln -sfn {{ mickey_build_local_bin_dir }}/node /usr/local/bin/node
+        ln -sfn {{ mickey_build_local_bin_dir }}/npm /usr/local/bin/npm
+        ln -sfn {{ mickey_build_local_bin_dir }}/npx /usr/local/bin/npx
+
+    - name: Install Codex CLI for the build user
+      ansible.builtin.raw: |
+        set -eu
+        current_version="$(/home/{{ mickey_guest_admin_user }}/.local/node_modules/.bin/codex --version 2>/dev/null | awk '{print $2}' || true)"
+        if [ "$current_version" != "{{ mickey_build_codex_version }}" ]; then
+          su - {{ mickey_guest_admin_user }} -c 'PATH=/usr/local/bin:/usr/bin:/bin npm install --no-audit --no-fund --prefix /home/{{ mickey_guest_admin_user }}/.local {{ mickey_build_codex_package_spec }}'
+        fi
+        ln -sfn /home/{{ mickey_guest_admin_user }}/.local/node_modules/.bin/codex {{ mickey_build_local_bin_dir }}/codex
+        ln -sfn {{ mickey_build_local_bin_dir }}/codex /usr/local/bin/codex
+      when: mickey_build_enable_codex | default(false) | bool
+
+    - name: Ensure required build repos are available
+      ansible.builtin.raw: |
+        set -eu
+        repo_dir="{{ mickey_build_repo_root }}/{{ item.name }}"
+        repo_url="{{ item.url }}"
+        git_ssh_command="ssh -F /home/{{ mickey_guest_admin_user }}/.ssh/config"
+
+        if [ -d "$repo_dir" ] && [ ! -d "$repo_dir/.git" ]; then
+          echo "refusing to clone into non-git directory: $repo_dir" >&2
+          exit 1
+        fi
+
+        if [ ! -d "$repo_dir/.git" ]; then
+          su - {{ mickey_guest_admin_user }} -c "GIT_SSH_COMMAND='$git_ssh_command' git clone '$repo_url' '$repo_dir'"
+          exit 0
+        fi
+
+        su - {{ mickey_guest_admin_user }} -c "git -C '$repo_dir' remote set-url origin '$repo_url'"
+        su - {{ mickey_guest_admin_user }} -c "GIT_SSH_COMMAND='$git_ssh_command' git -C '$repo_dir' fetch --all --prune"
+        su - {{ mickey_guest_admin_user }} -c "git -C '$repo_dir' remote set-head origin -a >/dev/null 2>&1 || true"
+
+        default_branch="$(su - {{ mickey_guest_admin_user }} -c "git -C '$repo_dir' symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@'")"
+        if [ -z "$default_branch" ]; then
+          default_branch="$(su - {{ mickey_guest_admin_user }} -c "git -C '$repo_dir' rev-parse --abbrev-ref HEAD")"
+        fi
+
+        current_branch="$(su - {{ mickey_guest_admin_user }} -c "git -C '$repo_dir' rev-parse --abbrev-ref HEAD")"
+        repo_dirty="$(su - {{ mickey_guest_admin_user }} -c "git -C '$repo_dir' status --porcelain")"
+
+        if [ "$current_branch" = "$default_branch" ] && [ -z "$repo_dirty" ]; then
+          su - {{ mickey_guest_admin_user }} -c "GIT_SSH_COMMAND='$git_ssh_command' git -C '$repo_dir' pull --ff-only origin '$default_branch'"
+        else
+          echo "leaving $repo_dir unchanged because it is not on the default branch or has local changes"
+        fi
+      loop: "{{ mickey_build_git_repos }}"
+      when: mickey_build_enable_repo_clones | default(false) | bool
+
+    - name: Enable the guest agent and SSH service
+      ansible.builtin.raw: |
+        systemctl enable --now qemu-guest-agent
+        systemctl enable --now ssh

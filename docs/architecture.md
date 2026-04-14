@@ -31,11 +31,20 @@ It deliberately does not deploy the main runtime stack. The primary runtime stac
 - starts from the same Ubuntu 24.04 cloud-init base as the control VM
 - becomes the desktop role when `ansible-desktop` installs the GUI stack and XRDP
 
+### Legacy build VM
+
+- Ubuntu 18.04 guest for legacy Yocto and related build work
+- named `mickey-thud`
+- sized for intermittent use: `4 vCPU`, `16 GiB` RAM, `400 GiB` disk
+- keeps its main disk on `bulk` instead of the NVMe-backed datastore
+- is provisioned but intentionally left powered off and disabled from boot by default
+
 ## Storage model
 
 - NVMe: Proxmox OS and fast VM disks
 - HDD: one ext4-backed Proxmox directory datastore named `bulk`
 - `mickey-main` gets a `2 TiB` virtual disk from `bulk`
+- `mickey-thud` keeps its `400 GiB` disk on `bulk`
 - remaining `bulk` capacity stays available for backups, ISOs, templates, and future VM disks
 
 ## Why Samba is in the desktop VM

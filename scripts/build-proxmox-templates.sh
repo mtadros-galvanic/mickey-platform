@@ -13,15 +13,15 @@ SERVER_TEMPLATE_NAME="${SERVER_TEMPLATE_NAME:-ubuntu-24-04-server-cloudinit}"
 DESKTOP_TEMPLATE_NAME="${DESKTOP_TEMPLATE_NAME:-ubuntu-24-04-desktop-cloudinit}"
 UBUNTU_CLOUD_IMAGE_URL="${UBUNTU_CLOUD_IMAGE_URL:-https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img}"
 PROXMOX_IMAGE_CACHE_DIR="${PROXMOX_IMAGE_CACHE_DIR:-/var/lib/vz/template/cache}"
+BUILD_DESKTOP_TEMPLATE="${BUILD_DESKTOP_TEMPLATE:-1}"
 FORCE_REBUILD=0
 
 usage() {
   cat <<'EOF'
 usage: build-proxmox-templates.sh [--force]
 
-Builds the two Proxmox templates expected by envs/prod/terraform.tfvars:
-  - ubuntu-24-04-server-cloudinit
-  - ubuntu-24-04-desktop-cloudinit
+Builds the default Ubuntu 24.04 templates expected by envs/prod/terraform.tfvars.
+It can also build a single server template when BUILD_DESKTOP_TEMPLATE=0.
 
 Environment overrides:
   PROXMOX_SSH_TARGET      SSH target for the Proxmox host
@@ -29,11 +29,12 @@ Environment overrides:
   PROXMOX_BRIDGE          Proxmox bridge for the imported template NIC
   PROXMOX_STORAGE         Proxmox storage for the imported disks and cloud-init drive
   SERVER_TEMPLATE_ID      VMID for the server template
-  DESKTOP_TEMPLATE_ID     VMID for the desktop template
+  DESKTOP_TEMPLATE_ID     VMID for the desktop template clone
   SERVER_TEMPLATE_NAME    Name for the server template
-  DESKTOP_TEMPLATE_NAME   Name for the desktop template
+  DESKTOP_TEMPLATE_NAME   Name for the desktop template clone
   UBUNTU_CLOUD_IMAGE_URL  Source image URL
   PROXMOX_IMAGE_CACHE_DIR Download location on the Proxmox host
+  BUILD_DESKTOP_TEMPLATE  1 to clone a desktop template, 0 to build the server template only
 EOF
 }
 
@@ -85,6 +86,7 @@ PROXMOX_STORAGE="$6"
 UBUNTU_CLOUD_IMAGE_URL="$7"
 PROXMOX_IMAGE_CACHE_DIR="$8"
 FORCE_REBUILD="$9"
+BUILD_DESKTOP_TEMPLATE="${10}"
 
 for tool in qm wget; do
   if ! command -v "$tool" >/dev/null 2>&1; then
@@ -160,14 +162,25 @@ create_desktop_template() {
 }
 
 ensure_cloud_image
-assert_missing_or_destroy "$DESKTOP_TEMPLATE_ID" "desktop template"
+
+if [[ "$BUILD_DESKTOP_TEMPLATE" == "1" ]]; then
+  assert_missing_or_destroy "$DESKTOP_TEMPLATE_ID" "desktop template"
+fi
+
 assert_missing_or_destroy "$SERVER_TEMPLATE_ID" "server template"
 create_server_template
-create_desktop_template
+
+if [[ "$BUILD_DESKTOP_TEMPLATE" == "1" ]]; then
+  create_desktop_template
+fi
 
 echo
 echo "templates ready:"
-qm list | awk -v a="$SERVER_TEMPLATE_ID" -v b="$DESKTOP_TEMPLATE_ID" '$1 == a || $1 == b { print }'
+if [[ "$BUILD_DESKTOP_TEMPLATE" == "1" ]]; then
+  qm list | awk -v a="$SERVER_TEMPLATE_ID" -v b="$DESKTOP_TEMPLATE_ID" '$1 == a || $1 == b { print }'
+else
+  qm list | awk -v a="$SERVER_TEMPLATE_ID" '$1 == a { print }'
+fi
 EOF
 
 ssh "${ssh_args[@]}" "$PROXMOX_SSH_TARGET" bash -s -- \
@@ -179,4 +192,5 @@ ssh "${ssh_args[@]}" "$PROXMOX_SSH_TARGET" bash -s -- \
   "$PROXMOX_STORAGE" \
   "$UBUNTU_CLOUD_IMAGE_URL" \
   "$PROXMOX_IMAGE_CACHE_DIR" \
-  "$FORCE_REBUILD" <<<"$remote_script"
+  "$FORCE_REBUILD" \
+  "$BUILD_DESKTOP_TEMPLATE" <<<"$remote_script"

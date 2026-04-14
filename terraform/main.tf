@@ -30,6 +30,11 @@ locals {
     format("%s(%d)", template_name, length(matches))
     if length(matches) != 1
   ]
+
+  requested_vm_names = concat(
+    [var.control_vm.name, var.desktop_vm.name],
+    [for vm in values(var.extra_vms) : vm.name]
+  )
 }
 
 check "clone_template_lookup" {
@@ -39,14 +44,21 @@ check "clone_template_lookup" {
   }
 }
 
+check "unique_vm_names" {
+  assert {
+    condition     = length(local.requested_vm_names) == length(toset(local.requested_vm_names))
+    error_message = "Every VM must have a unique name. Duplicate names found in the requested VM definitions."
+  }
+}
+
 resource "proxmox_virtual_environment_vm" "mickey" {
   for_each = local.vm_definitions
 
   name          = each.value.name
   node_name     = var.proxmox_node_name
   vm_id         = each.value.vm_id
-  started       = true
-  on_boot       = true
+  started       = each.value.started
+  on_boot       = each.value.on_boot
   bios          = "ovmf"
   machine       = "q35"
   scsi_hardware = "virtio-scsi-single"
@@ -71,7 +83,7 @@ resource "proxmox_virtual_environment_vm" "mickey" {
   }
 
   disk {
-    datastore_id = var.fast_datastore_id
+    datastore_id = each.value.os_disk_datastore_id
     interface    = "scsi0"
     size         = each.value.os_disk_gb
   }
@@ -95,6 +107,7 @@ resource "proxmox_virtual_environment_vm" "mickey" {
 
     user_account {
       username = var.vm_admin_user
+      password = each.value.admin_password_hash
       keys     = var.ssh_public_keys
     }
 
@@ -116,6 +129,8 @@ resource "local_file" "ansible_inventory" {
   filename = abspath(var.ansible_inventory_output_path)
   content = templatefile("${path.module}/templates/ansible-inventory.yml.tftpl", {
     hosts                        = local.inventory_hosts
+    groups                       = local.inventory_groups
+    group_names                  = local.inventory_group_names
     ansible_ssh_private_key_file = pathexpand(var.ansible_ssh_private_key_file)
   })
 
