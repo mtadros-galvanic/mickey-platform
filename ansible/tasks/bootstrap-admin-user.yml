@@ -37,7 +37,7 @@
 
 - name: Ensure the bootstrap user's SSH directory exists
   ansible.builtin.file:
-    path: "/home/{{ mickey_guest_admin_user }}/.ssh"
+    path: "{{ mickey_guest_admin_home }}/.ssh"
     state: directory
     owner: "{{ mickey_guest_admin_user }}"
     group: "{{ mickey_guest_admin_user }}"
@@ -45,7 +45,7 @@
 
 - name: Ensure the bootstrap user's authorized_keys matches the configured key set
   ansible.builtin.copy:
-    dest: "/home/{{ mickey_guest_admin_user }}/.ssh/authorized_keys"
+    dest: "{{ mickey_guest_admin_home }}/.ssh/authorized_keys"
     content: "{{ (mickey_guest_authorized_keys | join('\n')) ~ '\n' }}"
     owner: "{{ mickey_guest_admin_user }}"
     group: "{{ mickey_guest_admin_user }}"

@@ -1,3 +1,16 @@
+mickey_guest_admin_user: root
+
+mickey_proxmox_apt_packages:
+  - bubblewrap
+  - ca-certificates
+  - cifs-utils
+  - curl
+  - e2fsprogs
+  - git
+  - parted
+  - util-linux
+  - xz-utils
+
 mickey_bulk_disk_device: /dev/sda
 mickey_bulk_disk_expected_model: ST4000DM004-2U9104
 mickey_bulk_partition_number: 1
@@ -7,6 +20,13 @@ mickey_bulk_mount_path: /mnt/pve/bulk
 mickey_bulk_storage_name: bulk
 mickey_bulk_storage_content: images,backup,iso,vztmpl,snippets
 mickey_bulk_disk_wipe_confirm: false
+mickey_proxmox_share_enable: true
+mickey_proxmox_share_mount_path: "{{ mickey_shared_mount_path }}"
+mickey_proxmox_share_name: mickey-share
+mickey_proxmox_share_server: 10.25.1.206
+mickey_proxmox_share_credentials_path: /etc/mickey-platform/mickey-infra-share.credentials
+mickey_proxmox_share_fstab_options: "credentials={{ mickey_proxmox_share_credentials_path }},uid=0,gid=0,vers=3.0,file_mode=0660,dir_mode=0770,mfsymlinks,_netdev,nofail,x-systemd.automount"
+mickey_proxmox_share_probe_timeout_seconds: 2
 mickey_proxmox_disabled_repo_files:
   - /etc/apt/sources.list.d/pve-enterprise.sources
 mickey_proxmox_repo_file: /etc/apt/sources.list.d/proxmox.sources

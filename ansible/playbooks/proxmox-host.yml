@@ -6,12 +6,23 @@
 
   vars:
     mickey_bulk_partition_basename: "{{ mickey_bulk_partition_device | basename }}"
+    mickey_proxmox_share_mount_username: "{{ (samba.username | default(mickey_guest_admin_user)) if (samba is defined) else mickey_guest_admin_user }}"
 
   pre_tasks:
     - name: Load secrets if provided
       ansible.builtin.include_vars:
         file: "{{ secret_vars_file }}"
       when: secret_vars_file is defined
+
+    - name: Fail when the Samba password is missing for the Proxmox share mount
+      ansible.builtin.fail:
+        msg: "samba.password must be present in the secrets file to configure the Proxmox host share mount."
+      when:
+        - mickey_proxmox_share_enable | default(true) | bool
+        - >-
+            samba is not defined
+            or samba.password is not defined
+            or (samba.password | string | length) == 0
 
   tasks:
     - name: Disable enterprise-only Proxmox repository files on non-subscribed hosts
@@ -36,12 +47,9 @@
         group: root
         mode: "0644"
 
-    - name: Install packages required for storage provisioning
+    - name: Install packages required for the Proxmox host baseline
       ansible.builtin.apt:
-        name:
-          - e2fsprogs
-          - parted
-          - util-linux
+        name: "{{ mickey_proxmox_apt_packages }}"
         state: present
         update_cache: true
 
@@ -206,3 +214,104 @@
         --path {{ mickey_bulk_mount_path }}
         --content {{ mickey_bulk_storage_content }}
       when: mickey_bulk_storage_name not in mickey_pvesm_status.stdout
+
+    - name: Ensure the Proxmox share mount path exists
+      ansible.builtin.file:
+        path: "{{ mickey_proxmox_share_mount_path }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      when: mickey_proxmox_share_enable | default(true) | bool
+
+    - name: Ensure the Proxmox share credential directory exists
+      ansible.builtin.file:
+        path: /etc/mickey-platform
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      when: mickey_proxmox_share_enable | default(true) | bool
+
+    - name: Install the Proxmox share credentials file
+      ansible.builtin.copy:
+        dest: "{{ mickey_proxmox_share_credentials_path }}"
+        content: |-
+          username={{ mickey_proxmox_share_mount_username }}
+          password={{ samba.password }}
+        owner: root
+        group: root
+        mode: "0600"
+      when: mickey_proxmox_share_enable | default(true) | bool
+      no_log: true
+
+    - name: Persist the Proxmox share automount in fstab
+      ansible.builtin.lineinfile:
+        path: /etc/fstab
+        regexp: "^//[^[:space:]]+\\s+{{ mickey_proxmox_share_mount_path | regex_escape() }}\\s+cifs\\s"
+        line: "//{{ mickey_proxmox_share_server }}/{{ mickey_proxmox_share_name }} {{ mickey_proxmox_share_mount_path }} cifs {{ mickey_proxmox_share_fstab_options }} 0 0"
+      when: mickey_proxmox_share_enable | default(true) | bool
+
+    - name: Reload systemd to pick up the Proxmox share automount
+      ansible.builtin.systemd:
+        daemon_reload: true
+      when: mickey_proxmox_share_enable | default(true) | bool
+
+    - name: Probe the infra Samba endpoint before the first Proxmox share mount
+      ansible.builtin.shell: |
+        timeout {{ mickey_proxmox_share_probe_timeout_seconds | int }} \
+          bash -c '>/dev/tcp/{{ mickey_proxmox_share_server }}/445'
+      args:
+        executable: /bin/bash
+      register: mickey_proxmox_share_endpoint_probe
+      changed_when: false
+      failed_when: false
+      when: mickey_proxmox_share_enable | default(true) | bool
+
+    - name: Mount the Proxmox share when the infra Samba endpoint is reachable
+      ansible.builtin.shell: |
+        mount_point={{ mickey_proxmox_share_mount_path | quote }}
+        if mountpoint -q "$mount_point"; then
+          options="$(findmnt -no OPTIONS --target "$mount_point" || true)"
+          if printf '%s\n' "$options" | grep -qw mfsymlinks; then
+            mount -o remount "$mount_point"
+            exit 0
+          fi
+          umount "$mount_point"
+        fi
+        mount "$mount_point"
+      args:
+        executable: /bin/bash
+      changed_when: false
+      when:
+        - mickey_proxmox_share_enable | default(true) | bool
+        - mickey_proxmox_share_endpoint_probe.rc == 0
+
+    - name: Explain why the first Proxmox share mount was skipped
+      ansible.builtin.debug:
+        msg: >-
+          Configured {{ mickey_proxmox_share_mount_path }} as an automount but
+          skipped the initial mount because {{ mickey_proxmox_share_server }}:445
+          is not reachable yet.
+      when:
+        - mickey_proxmox_share_enable | default(true) | bool
+        - mickey_proxmox_share_endpoint_probe.rc != 0
+
+    - name: Check whether the Proxmox host share is mounted
+      ansible.builtin.command: "findmnt -n -o SOURCE --target {{ mickey_proxmox_share_mount_path }}"
+      register: mickey_proxmox_share_mount_source
+      changed_when: false
+      failed_when: false
+      when: mickey_proxmox_share_enable | default(true) | bool
+
+    - name: Install Codex tooling on the Proxmox host
+      ansible.builtin.include_tasks: ../tasks/install-codex-cli.yml
+      when:
+        - mickey_codex_enable | default(false) | bool
+        - not (mickey_proxmox_share_enable | default(true) | bool) or (mickey_proxmox_share_mount_source.stdout | trim != "")
+
+    - name: Point the Proxmox host at the shared Codex auth file when present
+      ansible.builtin.include_tasks: ../tasks/configure-codex-auth.yml
+      when:
+        - mickey_codex_enable | default(false) | bool
+        - not (mickey_proxmox_share_enable | default(true) | bool) or (mickey_proxmox_share_mount_source.stdout | trim != "")

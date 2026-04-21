@@ -1,0 +1,24 @@
+#!/bin/sh
+set -u
+
+export CODEX_HOME="${CODEX_HOME:-{{ mickey_codex_local_home }}}"
+
+sync_cmd={{ mickey_codex_sync_script_path | quote }}
+real_codex={{ mickey_codex_real_bin_path | quote }}
+
+{% if mickey_codex_shared_auth_enable | default(false) | bool %}
+if [ -x "$sync_cmd" ]; then
+  "$sync_cmd" || true
+fi
+{% endif %}
+
+"$real_codex" "$@"
+status=$?
+
+{% if mickey_codex_shared_auth_enable | default(false) | bool %}
+if [ -x "$sync_cmd" ]; then
+  "$sync_cmd" || true
+fi
+{% endif %}
+
+exit "$status"

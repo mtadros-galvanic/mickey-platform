@@ -1,0 +1,44 @@
+#!/bin/sh
+set -eu
+
+local_home={{ mickey_codex_local_home | quote }}
+local_auth={{ mickey_codex_local_auth_path | quote }}
+shared_root={{ mickey_codex_shared_root | quote }}
+shared_auth={{ mickey_codex_shared_auth_path | quote }}
+shared_parent="$(dirname "$shared_root")"
+guest_user={{ mickey_guest_admin_user | quote }}
+guest_group={{ mickey_guest_admin_user | quote }}
+
+umask 077
+install -d -m 0700 -o "$guest_user" -g "$guest_group" "$local_home"
+
+if [ ! -d "$shared_parent" ]; then
+  exit 0
+fi
+
+if [ ! -d "$shared_root" ]; then
+  mkdir -p "$shared_root"
+  chown "$guest_user":"$guest_group" "$shared_root" || true
+  chmod 0770 "$shared_root" || true
+fi
+
+if [ -f "$local_auth" ] && [ ! -L "$local_auth" ]; then
+  if [ ! -f "$shared_auth" ]; then
+    cp -f "$local_auth" "$shared_auth"
+  elif ! cmp -s "$local_auth" "$shared_auth"; then
+    if [ "$local_auth" -nt "$shared_auth" ]; then
+      cp -f "$local_auth" "$shared_auth"
+    fi
+  fi
+fi
+
+if [ -f "$shared_auth" ]; then
+  chown "$guest_user":"$guest_group" "$shared_auth" || true
+  chmod 0600 "$shared_auth" || true
+
+  if [ ! -L "$local_auth" ] || [ "$(readlink "$local_auth" 2>/dev/null || true)" != "$shared_auth" ]; then
+    rm -f "$local_auth"
+    ln -s "$shared_auth" "$local_auth"
+    chown -h "$guest_user":"$guest_group" "$local_auth" || true
+  fi
+fi

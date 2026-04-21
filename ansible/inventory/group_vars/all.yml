@@ -1,1 +1,32 @@
 mickey_guest_admin_user: galvanic
+mickey_guest_admin_home: "{{ '/root' if mickey_guest_admin_user == 'root' else '/home/' ~ mickey_guest_admin_user }}"
+
+mickey_shared_mount_path: /mnt/mickey-share
+
+mickey_codex_node_version: "16.20.2"
+mickey_codex_node_arch: "linux-x64"
+mickey_codex_node_archive_name: "node-v{{ mickey_codex_node_version }}-{{ mickey_codex_node_arch }}"
+mickey_codex_node_install_root: "{{ mickey_guest_admin_home }}/.local/opt"
+mickey_codex_node_install_dir: "{{ mickey_codex_node_install_root }}/{{ mickey_codex_node_archive_name }}"
+mickey_codex_node_archive_url: "https://nodejs.org/dist/v{{ mickey_codex_node_version }}/{{ mickey_codex_node_archive_name }}.tar.xz"
+mickey_codex_local_bin_dir: "{{ mickey_guest_admin_home }}/.local/bin"
+mickey_codex_shell_home: "{{ mickey_guest_admin_home }}/.codex"
+mickey_codex_shell_backup_home: "{{ mickey_guest_admin_home }}/.codex.local-pre-share"
+mickey_codex_shared_root: "{{ mickey_shared_mount_path }}/admin/codex"
+mickey_codex_hosts_root: "{{ mickey_codex_shared_root }}/hosts"
+mickey_codex_local_home: "{{ mickey_codex_hosts_root }}/{{ inventory_hostname }}"
+mickey_codex_local_auth_path: "{{ mickey_codex_local_home }}/auth.json"
+mickey_codex_local_auth_backup_path: "{{ mickey_codex_local_home }}/auth.json.local-backup"
+mickey_codex_local_skills_path: "{{ mickey_codex_local_home }}/skills"
+mickey_codex_local_skills_backup_path: "{{ mickey_codex_local_home }}/skills.local-backup"
+mickey_codex_npm_bin_path: "{{ mickey_guest_admin_home }}/.local/node_modules/.bin/codex"
+mickey_codex_wrapper_path: "{{ mickey_codex_local_bin_dir }}/codex"
+mickey_codex_real_bin_path: "{{ mickey_codex_local_bin_dir }}/codex-real"
+mickey_codex_sync_script_path: /usr/local/bin/mickey-codex-sync-auth
+mickey_codex_profile_script_path: /etc/profile.d/mickey-codex.sh
+mickey_codex_shared_auth_path: "{{ mickey_codex_shared_root }}/auth.json"
+mickey_codex_shared_skills_path: "{{ mickey_codex_shared_root }}/skills"
+mickey_codex_shared_auth_enable: true
+mickey_codex_package: "@openai/codex"
+mickey_codex_version: "0.122.0"
+mickey_codex_enable: true
