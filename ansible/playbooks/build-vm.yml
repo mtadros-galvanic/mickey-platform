@@ -63,6 +63,20 @@
             | list
           }}
 
+    - name: Add shared SSH bundle files required by specific build guests
+      ansible.builtin.set_fact:
+        mickey_guest_ssh_bundle_paths: "{{ (mickey_guest_ssh_bundle_paths + mickey_guest_shared_ssh_bundle_paths) | unique }}"
+      vars:
+        mickey_guest_shared_ssh_bundle_paths: >-
+          {{
+            [
+              ((playbook_dir | dirname) ~ '/files/ssh/john-gitlab'),
+              ((playbook_dir | dirname) ~ '/files/ssh/gitlab.ibeeto')
+            ]
+            if inventory_hostname == 'mickey-thud'
+            else []
+          }}
+
     - name: Load optional guest SSH bundle file payloads
       ansible.builtin.set_fact:
         mickey_guest_ssh_bundle_files: >-
@@ -128,7 +142,11 @@
 
     - name: Remove stale GitLab-specific SSH bundle files from the bootstrap user's SSH directory
       ansible.builtin.raw: |
-        rm -f /home/{{ mickey_guest_admin_user }}/.ssh/john-gitlab /home/{{ mickey_guest_admin_user }}/.ssh/gitlab.ibeeto
+        rm -f /home/{{ mickey_guest_admin_user }}/.ssh/{{ item }}
+      loop:
+        - john-gitlab
+        - gitlab.ibeeto
+      when: item not in (mickey_guest_ssh_bundle_files | map(attribute='name') | list)
       changed_when: false
 
     - name: Ensure GitHub is trusted for SSH repo access
