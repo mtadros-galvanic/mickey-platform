@@ -1,0 +1,136 @@
+---
+- name: Resolve the Consul client defaults for this guest
+  ansible.builtin.set_fact:
+    mickey_consul_server_address_effective: "{{ mickey_consul_server_address | default(hostvars['mickey-infra'].ansible_host | default('10.25.1.206')) }}"
+    mickey_consul_datacenter_effective: "{{ mickey_consul_datacenter | default('mickey') }}"
+    mickey_consul_config_dir_effective: "{{ mickey_consul_config_dir | default('/etc/consul.d') }}"
+    mickey_consul_config_file_effective: "{{ mickey_consul_config_file | default((mickey_consul_config_dir | default('/etc/consul.d')) ~ '/consul.hcl') }}"
+    mickey_consul_data_dir_effective: "{{ mickey_consul_data_dir | default('/var/lib/consul') }}"
+    mickey_consul_keyring_path_effective: "{{ mickey_consul_keyring_path | default('/usr/share/keyrings/hashicorp-archive-keyring.gpg') }}"
+    mickey_consul_repo_file_effective: "{{ mickey_consul_repo_file | default('/etc/apt/sources.list.d/hashicorp.list') }}"
+
+- name: Ensure Consul client prerequisites are installed
+  ansible.builtin.raw: |
+    set -eu
+    missing_packages=""
+    for pkg in ca-certificates curl gnupg; do
+      if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+        missing_packages="$missing_packages $pkg"
+      fi
+    done
+
+    if [ -n "$missing_packages" ]; then
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update
+      apt-get install -y $missing_packages
+      echo changed
+    fi
+  register: mickey_consul_prereq_result
+  changed_when: "'changed' in mickey_consul_prereq_result.stdout"
+
+- name: Install the HashiCorp archive keyring
+  ansible.builtin.raw: |
+    set -eu
+    tmp="$(mktemp)"
+    trap 'rm -f "$tmp"' EXIT
+
+    curl --fail --silent --show-error --location https://apt.releases.hashicorp.com/gpg \
+      | gpg --dearmor > "$tmp"
+
+    if [ -f {{ mickey_consul_keyring_path_effective | quote }} ] && cmp -s "$tmp" {{ mickey_consul_keyring_path_effective | quote }}; then
+      exit 0
+    fi
+
+    install -D -m 0644 -o root -g root "$tmp" {{ mickey_consul_keyring_path_effective | quote }}
+    echo changed
+  register: mickey_consul_keyring_result
+  changed_when: "'changed' in mickey_consul_keyring_result.stdout"
+
+- name: Install the HashiCorp apt repository
+  ansible.builtin.raw: |
+    set -eu
+    . /etc/os-release
+    codename="${UBUNTU_CODENAME:-${VERSION_CODENAME:-}}"
+    if [ -z "$codename" ]; then
+      echo "could not determine Ubuntu codename" >&2
+      exit 1
+    fi
+
+    repo="deb [arch=$(dpkg --print-architecture) signed-by={{ mickey_consul_keyring_path_effective }}] https://apt.releases.hashicorp.com $codename main"
+    current_repo="$(cat {{ mickey_consul_repo_file_effective | quote }} 2>/dev/null || true)"
+
+    if [ "$current_repo" = "$repo" ]; then
+      exit 0
+    fi
+
+    printf '%s\n' "$repo" > {{ mickey_consul_repo_file_effective | quote }}
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    echo changed
+  register: mickey_consul_repo_result
+  changed_when: "'changed' in mickey_consul_repo_result.stdout"
+
+- name: Install the Consul package
+  ansible.builtin.raw: |
+    set -eu
+    if dpkg -s consul >/dev/null 2>&1; then
+      exit 0
+    fi
+
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y consul
+    echo changed
+  register: mickey_consul_package_result
+  changed_when: "'changed' in mickey_consul_package_result.stdout"
+
+- name: Ensure the Consul config and data directories exist
+  ansible.builtin.raw: |
+    install -d -m 0750 -o consul -g consul {{ mickey_consul_config_dir_effective | quote }} {{ mickey_consul_data_dir_effective | quote }}
+  changed_when: false
+
+- name: Install the Consul client configuration
+  ansible.builtin.raw: |
+    set -eu
+    tmp="$(mktemp)"
+    trap 'rm -f "$tmp"' EXIT
+
+    cat > "$tmp" <<'EOF'
+    datacenter = "{{ mickey_consul_datacenter_effective }}"
+    data_dir = "{{ mickey_consul_data_dir_effective }}"
+    server = false
+    node_name = "{{ inventory_hostname }}"
+    bind_addr = "{{ ansible_host | default(inventory_hostname) }}"
+    advertise_addr = "{{ ansible_host | default(inventory_hostname) }}"
+    client_addr = "127.0.0.1"
+    retry_join = ["{{ mickey_consul_server_address_effective }}"]
+    leave_on_terminate = true
+
+    ports {
+      dns = -1
+      grpc = -1
+      grpc_tls = -1
+    }
+    EOF
+
+    if [ -f {{ mickey_consul_config_file_effective | quote }} ] && cmp -s "$tmp" {{ mickey_consul_config_file_effective | quote }}; then
+      exit 0
+    fi
+
+    install -D -m 0640 -o consul -g consul "$tmp" {{ mickey_consul_config_file_effective | quote }}
+    echo changed
+  register: mickey_consul_config_result
+  changed_when: "'changed' in mickey_consul_config_result.stdout"
+  notify:
+    - Validate Consul client config
+    - Restart Consul client
+
+- name: Flush Consul client handlers before enabling the service
+  ansible.builtin.meta: flush_handlers
+
+- name: Ensure the Consul client is enabled and started
+  ansible.builtin.raw: |
+    set -eu
+    systemctl enable consul >/dev/null
+    systemctl start consul
+  changed_when: false

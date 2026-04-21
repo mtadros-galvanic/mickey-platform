@@ -1,7 +1,8 @@
-# `make templates` creates these default Ubuntu 24.04 template names on Proxmox.
+# `make templates` creates the default Ubuntu 24.04 server template on Proxmox.
 # `make templates-bionic` creates the Ubuntu 18.04 template used by mickey-thud.
+# `make templates-jammy` creates the Ubuntu 22.04 template reserved for mickey-scarthgap.
 # The host baseline playbook must create the `bulk` datastore before Terraform
-# can attach the desktop VM data disk there.
+# can attach guest disks there.
 
 proxmox_node_name       = "pve"
 vm_bridge               = "vmbr0"
@@ -15,42 +16,63 @@ vm_admin_user           = "galvanic"
 cpu_type                = "host"
 common_vm_tags          = ["terraform", "mickey-platform", "mickey"]
 
-control_vm = {
-  clone_template_name = "ubuntu-24-04-server-cloudinit"
-  name                = "mickey-control"
-  vm_id               = 701
-  cpu_cores           = 2
-  memory_mb           = 4096
-  os_disk_gb          = 40
-  lan_ipv4_cidr       = "10.25.1.103/24"
-  tags                = ["automation", "control"]
-}
+vms = {
+  "mickey-infra" = {
+    clone_template_name = "ubuntu-24-04-server-cloudinit"
+    role                = "infra"
+    vm_id               = 700
+    cpu_cores           = 4
+    memory_mb           = 16384
+    os_disk_gb          = 220
+    lan_ipv4_cidr       = "10.25.1.206/24"
+    tags                = ["infra", "runtime", "samba"]
+    extra_disks = [
+      {
+        datastore_id = "bulk"
+        interface    = "scsi1"
+        size_gb      = 2048
+      }
+    ]
+  }
 
-desktop_vm = {
-  clone_template_name = "ubuntu-24-04-desktop-cloudinit"
-  name                = "mickey-main"
-  vm_id               = 700
-  cpu_cores           = 10
-  memory_mb           = 49152
-  os_disk_gb          = 220
-  data_disk_gb        = 2048
-  lan_ipv4_cidr       = "10.25.1.84/24"
-  tags                = ["desktop", "runtime", "samba"]
-}
+  "mickey-erp" = {
+    clone_template_name = "ubuntu-24-04-server-cloudinit"
+    role                = "erp"
+    consul_client       = true
+    vm_id               = 701
+    cpu_cores           = 6
+    memory_mb           = 24576
+    os_disk_gb          = 160
+    lan_ipv4_cidr       = "10.25.1.208/24"
+    tags                = ["erp"]
+  }
 
-extra_vms = {
-  thud = {
+  "mickey-thud" = {
     clone_template_name  = "ubuntu-18-04-server-cloudinit"
-    name                 = "mickey-thud"
     role                 = "build"
+    consul_client        = true
     vm_id                = 702
     cpu_cores            = 4
     memory_mb            = 16384
     os_disk_gb           = 400
     os_disk_datastore_id = "bulk"
     lan_ipv4_cidr        = "10.25.1.105/24"
-    started              = false
     on_boot              = false
     tags                 = ["build", "yocto", "ubuntu-18"]
+  }
+
+  "mickey-scarthgap" = {
+    clone_template_name  = "ubuntu-22-04-server-cloudinit"
+    role                 = "build"
+    consul_client        = true
+    vm_id                = 704
+    cpu_cores            = 4
+    memory_mb            = 16384
+    os_disk_gb           = 400
+    os_disk_datastore_id = "bulk"
+    lan_ipv4_cidr        = "10.25.1.210/24"
+    started              = false
+    on_boot              = false
+    tags                 = ["build", "yocto", "ubuntu-22"]
   }
 }

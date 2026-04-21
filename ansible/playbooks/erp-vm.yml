@@ -1,0 +1,145 @@
+---
+- name: Bootstrap the Mickey ERP VM
+  hosts: erp_vms
+  become: true
+  gather_facts: true
+
+  vars:
+    mickey_guest_admin_password_hash: "{{ guests.admin_password_hash | default(guests.extra_vm_admin_password_hash | default('')) if (guests is defined) else '' }}"
+    mickey_guest_fqdn: "{{ inventory_hostname }}.galvanic.local"
+    mickey_erp_share_mount_username: "{{ (samba.username | default(mickey_guest_admin_user)) if (samba is defined) else mickey_guest_admin_user }}"
+
+  pre_tasks:
+    - name: Load secrets if provided
+      ansible.builtin.include_vars:
+        file: "{{ secret_vars_file }}"
+      when: secret_vars_file is defined
+
+    - name: Fail when the Samba password is missing for the ERP share mount
+      ansible.builtin.fail:
+        msg: "samba.password must be present in the secrets file to configure the ERP share mount."
+      when: >-
+        samba is not defined
+        or samba.password is not defined
+        or (samba.password | string | length) == 0
+
+  handlers:
+    - name: Restart qemu-guest-agent
+      ansible.builtin.service:
+        name: qemu-guest-agent
+        state: restarted
+
+    - name: Validate Consul client config
+      ansible.builtin.raw: |
+        consul validate {{ mickey_consul_config_dir_effective | quote }}
+
+    - name: Restart Consul client
+      ansible.builtin.raw: |
+        systemctl restart consul
+
+  tasks:
+    - name: Install ERP baseline packages
+      ansible.builtin.apt:
+        name: "{{ mickey_erp_apt_packages }}"
+        state: present
+        update_cache: true
+
+    - name: Ensure the bootstrap user is configured
+      ansible.builtin.include_tasks: ../tasks/bootstrap-admin-user.yml
+
+    - name: Set the ERP hostname
+      ansible.builtin.hostname:
+        name: "{{ inventory_hostname }}"
+
+    - name: Ensure the ERP hosts file has the expected local hostname mapping
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: '^127\\.0\\.1\\.1\\s+'
+        line: "127.0.1.1 {{ mickey_guest_fqdn }} {{ inventory_hostname }}"
+
+    - name: Ensure the ERP share mount path exists
+      ansible.builtin.file:
+        path: "{{ mickey_erp_share_mount_path }}"
+        state: directory
+        owner: "{{ mickey_guest_admin_user }}"
+        group: "{{ mickey_guest_admin_user }}"
+        mode: "0770"
+
+    - name: Ensure the ERP share credential directory exists
+      ansible.builtin.file:
+        path: /etc/mickey-platform
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Install the ERP share credentials file
+      ansible.builtin.copy:
+        dest: "{{ mickey_erp_share_credentials_path }}"
+        content: |-
+          username={{ mickey_erp_share_mount_username }}
+          password={{ samba.password }}
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+
+    - name: Persist the ERP share automount in fstab
+      ansible.builtin.raw: |
+        set -eu
+        line="//{{ mickey_erp_share_server }}/{{ mickey_erp_share_name }} {{ mickey_erp_share_mount_path }} cifs {{ mickey_erp_share_fstab_options }} 0 0"
+        tmp="$(mktemp)"
+        trap 'rm -f "$tmp"' EXIT
+
+        if grep -Fqx "$line" /etc/fstab; then
+          grep -v " {{ mickey_erp_share_mount_path }} cifs " /etc/fstab > "$tmp" || true
+          printf '%s\n' "$line" >> "$tmp"
+          cat "$tmp" > /etc/fstab
+          systemctl daemon-reload
+          exit 0
+        fi
+
+        grep -v " {{ mickey_erp_share_mount_path }} cifs " /etc/fstab > "$tmp" || true
+        printf '%s\n' "$line" >> "$tmp"
+        cat "$tmp" > /etc/fstab
+        systemctl daemon-reload
+
+    - name: Reload systemd to pick up the ERP automount
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Enable guest-facing services
+      ansible.builtin.service:
+        name: "{{ item }}"
+        state: started
+        enabled: true
+      loop:
+        - qemu-guest-agent
+
+    - name: Mount the ERP share now that the fstab entry exists
+      ansible.builtin.shell: |
+        mount_point={{ mickey_erp_share_mount_path | quote }}
+        if mountpoint -q "$mount_point"; then
+          options="$(findmnt -no OPTIONS --target "$mount_point" || true)"
+          if printf '%s\n' "$options" | grep -qw mfsymlinks; then
+            mount -o remount "$mount_point"
+            exit 0
+          fi
+          umount "$mount_point"
+        fi
+        mount "$mount_point"
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Install the Consul client baseline for the ERP guest
+      ansible.builtin.include_tasks: ../tasks/install-consul-client.yml
+
+    - name: Install Codex tooling for the ERP guest
+      ansible.builtin.include_tasks: ../tasks/install-codex-cli.yml
+
+    - name: Point the ERP guest at the shared Codex auth file when present
+      ansible.builtin.include_tasks: ../tasks/configure-codex-auth.yml
+
+    - name: Install the curated admin dotfiles on the ERP guest
+      ansible.builtin.include_tasks: ../tasks/configure-admin-dotfiles.yml

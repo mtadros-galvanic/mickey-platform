@@ -64,8 +64,8 @@ variable "vm_admin_user" {
   default     = "galvanic"
 }
 
-variable "extra_vm_admin_password_hash" {
-  description = "Optional password hash applied to additional VMs only."
+variable "vm_admin_password_hash" {
+  description = "Optional password hash applied to provisioned guest VMs."
   type        = string
   default     = null
   sensitive   = true
@@ -100,47 +100,12 @@ variable "ansible_ssh_private_key_file" {
   default     = "~/.ssh/mickey"
 }
 
-variable "control_vm" {
-  description = "Control VM definition."
-  type = object({
-    clone_template_name  = string
-    name                 = string
-    vm_id                = number
-    cpu_cores            = number
-    memory_mb            = number
-    os_disk_gb           = number
-    os_disk_datastore_id = optional(string)
-    lan_ipv4_cidr        = string
-    started              = optional(bool, true)
-    on_boot              = optional(bool, true)
-    tags                 = optional(list(string), [])
-  })
-}
-
-variable "desktop_vm" {
-  description = "Desktop VM definition."
-  type = object({
-    clone_template_name  = string
-    name                 = string
-    vm_id                = number
-    cpu_cores            = number
-    memory_mb            = number
-    os_disk_gb           = number
-    os_disk_datastore_id = optional(string)
-    data_disk_gb         = number
-    lan_ipv4_cidr        = string
-    started              = optional(bool, true)
-    on_boot              = optional(bool, true)
-    tags                 = optional(list(string), [])
-  })
-}
-
-variable "extra_vms" {
-  description = "Additional VM definitions."
+variable "vms" {
+  description = "Guest VM definitions keyed by guest name."
   type = map(object({
     clone_template_name  = string
-    name                 = string
-    role                 = optional(string, "extra")
+    role                 = string
+    consul_client        = optional(bool, false)
     vm_id                = number
     cpu_cores            = number
     memory_mb            = number
@@ -155,6 +120,10 @@ variable "extra_vms" {
       interface    = string
       size_gb      = number
     })), [])
+    usb_devices = optional(list(object({
+      host    = optional(string)
+      mapping = optional(string)
+      usb3    = optional(bool)
+    })), [])
   }))
-  default = {}
 }

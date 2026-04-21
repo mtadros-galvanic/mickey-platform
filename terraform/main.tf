@@ -31,10 +31,7 @@ locals {
     if length(matches) != 1
   ]
 
-  requested_vm_names = concat(
-    [var.control_vm.name, var.desktop_vm.name],
-    [for vm in values(var.extra_vms) : vm.name]
-  )
+  requested_vm_names = keys(local.vm_definitions)
 }
 
 check "clone_template_lookup" {
@@ -97,6 +94,15 @@ resource "proxmox_virtual_environment_vm" "mickey" {
     }
   }
 
+  dynamic "usb" {
+    for_each = each.value.usb_devices
+    content {
+      host    = try(usb.value.host, null)
+      mapping = try(usb.value.mapping, null)
+      usb3    = try(usb.value.usb3, null)
+    }
+  }
+
   network_device {
     bridge   = var.vm_bridge
     firewall = false
@@ -123,13 +129,18 @@ resource "proxmox_virtual_environment_vm" "mickey" {
       }
     }
   }
+
+  lifecycle {
+    # Template lineage is creation-time only for these long-lived guests.
+    ignore_changes = [clone]
+  }
 }
 
 resource "local_file" "ansible_inventory" {
   filename = abspath(var.ansible_inventory_output_path)
   content = templatefile("${path.module}/templates/ansible-inventory.yml.tftpl", {
     hosts                        = local.inventory_hosts
-    groups                       = local.inventory_groups
+    groups                       = local.inventory_all_groups
     group_names                  = local.inventory_group_names
     ansible_ssh_private_key_file = pathexpand(var.ansible_ssh_private_key_file)
   })

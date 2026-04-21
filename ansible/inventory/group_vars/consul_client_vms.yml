@@ -1,0 +1,7 @@
+mickey_consul_server_address: "{{ hostvars['mickey-infra'].ansible_host | default('10.25.1.206') }}"
+mickey_consul_datacenter: mickey
+mickey_consul_config_dir: /etc/consul.d
+mickey_consul_config_file: "{{ mickey_consul_config_dir }}/consul.hcl"
+mickey_consul_data_dir: /var/lib/consul
+mickey_consul_keyring_path: /usr/share/keyrings/hashicorp-archive-keyring.gpg
+mickey_consul_repo_file: /etc/apt/sources.list.d/hashicorp.list

@@ -1,48 +1,19 @@
 locals {
-  built_in_vm_definitions = {
-    (var.control_vm.name) = merge({
-      role                 = "control"
-      os_disk_datastore_id = var.fast_datastore_id
-      started              = true
-      on_boot              = true
-      tags                 = []
-      extra_disks          = []
-      admin_password_hash  = null
-    }, var.control_vm)
-
-    (var.desktop_vm.name) = merge({
-      role                 = "desktop"
-      os_disk_datastore_id = var.fast_datastore_id
-      started              = true
-      on_boot              = true
-      tags                 = []
-      extra_disks          = []
-      admin_password_hash  = null
-      }, var.desktop_vm, {
-      extra_disks = [
-        {
-          datastore_id = var.bulk_datastore_id
-          interface    = "scsi1"
-          size_gb      = var.desktop_vm.data_disk_gb
-        }
-      ]
-    })
-  }
-
-  extra_vm_definitions = {
-    for _, vm in var.extra_vms :
-    vm.name => merge({
+  vm_definitions = {
+    for vm_name, vm in var.vms :
+    vm_name => merge({
       role                 = "extra"
+      consul_client        = false
       os_disk_datastore_id = var.fast_datastore_id
       started              = true
       on_boot              = true
       tags                 = []
       extra_disks          = []
-      admin_password_hash  = var.extra_vm_admin_password_hash
+      usb_devices          = []
+      admin_password_hash  = var.vm_admin_password_hash
+      name                 = vm_name
     }, vm)
   }
-
-  vm_definitions = merge(local.built_in_vm_definitions, local.extra_vm_definitions)
 
   template_names = toset([
     for vm in values(local.vm_definitions) : vm.clone_template_name
@@ -66,5 +37,22 @@ locals {
     ])
   }
 
-  inventory_group_names = sort(keys(local.inventory_groups))
+  inventory_extra_groups = {
+    consul_client_vms = sort([
+      for host_key, vm in local.vm_definitions :
+      host_key
+      if vm.consul_client
+    ])
+  }
+
+  inventory_all_groups = merge(
+    local.inventory_groups,
+    {
+      for group_name, hosts in local.inventory_extra_groups :
+      group_name => hosts
+      if length(hosts) > 0
+    }
+  )
+
+  inventory_group_names = sort(keys(local.inventory_all_groups))
 }

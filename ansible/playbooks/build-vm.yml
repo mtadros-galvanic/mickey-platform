@@ -4,11 +4,22 @@
   become: true
   gather_facts: false
 
+  vars:
+    mickey_build_share_mount_username: "{{ (samba.username | default(mickey_guest_admin_user)) if (samba is defined) else mickey_guest_admin_user }}"
+
   pre_tasks:
     - name: Load secrets if provided
       ansible.builtin.include_vars:
         file: "{{ secret_vars_file }}"
       when: secret_vars_file is defined
+
+    - name: Fail when the Samba password is missing for the build share mount
+      ansible.builtin.fail:
+        msg: "samba.password must be present in the secrets file to configure the build share mount on build VMs."
+      when: >-
+        samba is not defined
+        or samba.password is not defined
+        or (samba.password | string | length) == 0
 
     - name: Build the bootstrap user's authorized key set
       ansible.builtin.set_fact:
@@ -33,20 +44,6 @@
             )
             | unique
           }}
-
-    - name: Build the Codex package spec
-      ansible.builtin.set_fact:
-        mickey_build_codex_package_spec: >-
-          {{
-            mickey_build_codex_package
-            ~
-            (
-              ('@' ~ mickey_build_codex_version)
-              if (mickey_build_codex_version is defined and (mickey_build_codex_version | length) > 0)
-              else ''
-            )
-          }}
-      when: mickey_build_enable_codex | default(false) | bool
 
     - name: Discover optional guest SSH bundle files
       ansible.builtin.set_fact:
@@ -94,6 +91,15 @@
       when: (mickey_guest_ssh_bundle_paths | length) > 0
       no_log: true
 
+  handlers:
+    - name: Validate Consul client config
+      ansible.builtin.raw: |
+        consul validate {{ mickey_consul_config_dir_effective | quote }}
+
+    - name: Restart Consul client
+      ansible.builtin.raw: |
+        systemctl restart consul
+
   tasks:
     - name: Install build VM baseline packages
       ansible.builtin.raw: |
@@ -103,11 +109,19 @@
 
     - name: Ensure the bootstrap user has the configured password
       ansible.builtin.raw: |
-        usermod --password {{ guests.extra_vm_admin_password_hash | quote }} {{ mickey_guest_admin_user | quote }}
+        usermod --password {{ (guests.admin_password_hash | default(guests.extra_vm_admin_password_hash | default(''))) | quote }} {{ mickey_guest_admin_user | quote }}
       when:
         - guests is defined
-        - guests.extra_vm_admin_password_hash is defined
-        - (guests.extra_vm_admin_password_hash | length) > 0
+        - >-
+            (
+              guests.admin_password_hash is defined
+              and (guests.admin_password_hash | length) > 0
+            )
+            or
+            (
+              guests.extra_vm_admin_password_hash is defined
+              and (guests.extra_vm_admin_password_hash | length) > 0
+            )
 
     - name: Ensure the bootstrap user's authorized_keys matches the configured key set
       ansible.builtin.raw: |
@@ -162,40 +176,170 @@
 
     - name: Ensure build tooling directories exist
       ansible.builtin.raw: |
-        install -d -m 0755 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} /home/{{ mickey_guest_admin_user }}/.local
-        install -d -m 0755 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} {{ mickey_build_local_bin_dir | quote }}
-        install -d -m 0755 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} {{ mickey_build_node_install_root | quote }}
-        install -d -m 0755 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} /home/{{ mickey_guest_admin_user }}/.local/lib
         install -d -m 0755 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} {{ mickey_build_repo_root | quote }}
 
-    - name: Install the pinned Node.js runtime for build tooling
+    - name: Ensure build share paths exist
       ansible.builtin.raw: |
-        set -eu
-        archive="/tmp/{{ mickey_build_node_archive_name }}.tar.xz"
-        if [ "$({{ mickey_build_node_install_dir }}/bin/node -v 2>/dev/null || true)" != "v{{ mickey_build_node_version }}" ]; then
-          rm -rf {{ mickey_build_node_install_dir | quote }}
-          curl -fsSL {{ mickey_build_node_archive_url | quote }} -o "$archive"
-          tar -xJf "$archive" -C {{ mickey_build_node_install_root | quote }}
-          chown -R {{ mickey_guest_admin_user | quote }}:{{ mickey_guest_admin_user | quote }} {{ mickey_build_node_install_dir | quote }}
-          rm -f "$archive"
-        fi
-        ln -sfn {{ mickey_build_node_install_dir }}/bin/node {{ mickey_build_local_bin_dir }}/node
-        ln -sfn {{ mickey_build_node_install_dir }}/bin/npm {{ mickey_build_local_bin_dir }}/npm
-        ln -sfn {{ mickey_build_node_install_dir }}/bin/npx {{ mickey_build_local_bin_dir }}/npx
-        ln -sfn {{ mickey_build_local_bin_dir }}/node /usr/local/bin/node
-        ln -sfn {{ mickey_build_local_bin_dir }}/npm /usr/local/bin/npm
-        ln -sfn {{ mickey_build_local_bin_dir }}/npx /usr/local/bin/npx
+        install -d -m 0755 /etc/mickey-platform
+        install -d -m 0770 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} {{ mickey_build_share_mount_path | quote }}
 
-    - name: Install Codex CLI for the build user
+    - name: Install the build share credentials file
+      ansible.builtin.raw: |
+        cat > {{ mickey_build_share_credentials_path | quote }} <<'EOF'
+        username={{ mickey_build_share_mount_username }}
+        password={{ samba.password }}
+        EOF
+        chown root:root {{ mickey_build_share_credentials_path | quote }}
+        chmod 0600 {{ mickey_build_share_credentials_path | quote }}
+      no_log: true
+
+    - name: Persist the build share automount in fstab
       ansible.builtin.raw: |
         set -eu
-        current_version="$(/home/{{ mickey_guest_admin_user }}/.local/node_modules/.bin/codex --version 2>/dev/null | awk '{print $2}' || true)"
-        if [ "$current_version" != "{{ mickey_build_codex_version }}" ]; then
-          su - {{ mickey_guest_admin_user }} -c 'PATH=/usr/local/bin:/usr/bin:/bin npm install --no-audit --no-fund --prefix /home/{{ mickey_guest_admin_user }}/.local {{ mickey_build_codex_package_spec }}'
+        line="//{{ mickey_build_share_server }}/{{ mickey_build_share_name }} {{ mickey_build_share_mount_path }} cifs {{ mickey_build_share_fstab_options }} 0 0"
+        tmp="$(mktemp)"
+        trap 'rm -f "$tmp"' EXIT
+
+        if grep -Fqx "$line" /etc/fstab; then
+          exit 0
         fi
-        ln -sfn /home/{{ mickey_guest_admin_user }}/.local/node_modules/.bin/codex {{ mickey_build_local_bin_dir }}/codex
-        ln -sfn {{ mickey_build_local_bin_dir }}/codex /usr/local/bin/codex
-      when: mickey_build_enable_codex | default(false) | bool
+
+        grep -v " {{ mickey_build_share_mount_path }} cifs " /etc/fstab > "$tmp" || true
+        printf '%s\n' "$line" >> "$tmp"
+        cat "$tmp" > /etc/fstab
+        systemctl daemon-reload
+
+    - name: Install the manual build share mount helper
+      ansible.builtin.raw: |
+        cat > {{ mickey_build_share_mount_command | quote }} <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        if [[ "${EUID}" -ne 0 ]]; then
+          echo "run with sudo: sudo mickey-share-mount" >&2
+          exit 1
+        fi
+
+        mount_point={{ mickey_build_share_mount_path | quote }}
+        owner={{ mickey_guest_admin_user | quote }}
+
+        install -d -m 0770 -o "$owner" -g "$owner" "$mount_point"
+
+        mount "$mount_point"
+        ls "$mount_point" >/dev/null
+        echo "mounted $mount_point"
+        EOF
+        chown root:root {{ mickey_build_share_mount_command | quote }}
+        chmod 0755 {{ mickey_build_share_mount_command | quote }}
+
+    - name: Install the manual build share unmount helper
+      ansible.builtin.raw: |
+        cat > {{ mickey_build_share_umount_command | quote }} <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        if [[ "${EUID}" -ne 0 ]]; then
+          echo "run with sudo: sudo mickey-share-umount" >&2
+          exit 1
+        fi
+
+        mount_point={{ mickey_build_share_mount_path | quote }}
+
+        if ! mountpoint -q "$mount_point"; then
+          echo "$mount_point is not mounted"
+          exit 0
+        fi
+
+        umount "$mount_point"
+        echo "unmounted $mount_point"
+        EOF
+        chown root:root {{ mickey_build_share_umount_command | quote }}
+        chmod 0755 {{ mickey_build_share_umount_command | quote }}
+
+    - name: Mount the build share now that the fstab entry exists
+      ansible.builtin.raw: |
+        mount_point={{ mickey_build_share_mount_path | quote }}
+        if mountpoint -q "$mount_point"; then
+          options="$(findmnt -no OPTIONS --target "$mount_point" || true)"
+          if printf '%s\n' "$options" | grep -qw mfsymlinks; then
+            mount -o remount "$mount_point"
+            exit 0
+          fi
+          umount "$mount_point"
+        fi
+        mount "$mount_point"
+      changed_when: false
+
+    - name: Install the Consul client baseline for build guests
+      ansible.builtin.include_tasks: ../tasks/install-consul-client.yml
+
+    - name: Install Codex tooling for build guests
+      ansible.builtin.include_tasks: ../tasks/install-codex-cli.yml
+
+    - name: Point build guests at the shared Codex auth file when present
+      ansible.builtin.include_tasks: ../tasks/configure-codex-auth.yml
+
+    - name: Install the curated admin dotfiles on build guests
+      ansible.builtin.include_tasks: ../tasks/configure-admin-dotfiles.yml
+
+    - name: Install the Yocto fetch diagnosis helper
+      ansible.builtin.raw: |
+        cat > {{ mickey_build_yocto_diagnose_command | quote }} <<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        target_url="${1:-{{ mickey_build_yocto_target_url }}}"
+        control_url="${2:-{{ mickey_build_yocto_control_url }}}"
+        max_time="${MAX_TIME:-20}"
+
+        show_dns() {
+          local url="$1"
+          local host=""
+
+          host="$(printf '%s\n' "$url" | awk -F/ 'NF >= 3 { print $3 }')"
+          if [[ -z "$host" ]]; then
+            echo "unable to extract a hostname from: $url"
+            return 0
+          fi
+
+          echo "resolved addresses for $host"
+          getent ahostsv4 "$host" 2>/dev/null || getent ahosts "$host" 2>/dev/null || echo "resolution failed"
+        }
+
+        probe() {
+          local label="$1"
+          local url="$2"
+
+          echo "== $label =="
+          echo "url=$url"
+          show_dns "$url"
+          curl -L \
+            --output /dev/null \
+            --silent \
+            --show-error \
+            --write-out $'http_code=%{http_code}\nremote_ip=%{remote_ip}\ntime_namelookup=%{time_namelookup}\ntime_connect=%{time_connect}\ntime_appconnect=%{time_appconnect}\ntime_starttransfer=%{time_starttransfer}\ntime_total=%{time_total}\nsize_download=%{size_download}\nspeed_download=%{speed_download}\n' \
+            --max-time "$max_time" \
+            "$url" || true
+          echo
+        }
+
+        echo "resolver configuration"
+        cat /etc/resolv.conf
+        echo
+
+        if command -v resolvectl >/dev/null 2>&1; then
+          resolvectl status || true
+          echo
+        elif command -v systemd-resolve >/dev/null 2>&1; then
+          systemd-resolve --status || true
+          echo
+        fi
+
+        probe "target" "$target_url"
+        probe "control" "$control_url"
+        EOF
+        chown root:root {{ mickey_build_yocto_diagnose_command | quote }}
+        chmod 0755 {{ mickey_build_yocto_diagnose_command | quote }}
 
     - name: Ensure required build repos are available
       ansible.builtin.raw: |
