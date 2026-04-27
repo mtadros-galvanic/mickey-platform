@@ -1,0 +1,17 @@
+Host gitlab.com
+    User git
+    IdentityFile ~/.ssh/john-gitlab
+    IdentitiesOnly yes
+    User git
+
+
+Host gitlab.ibeeto.com
+    HostName gitlab.ibeeto.com
+    IdentityFile ~/.ssh/gitlab.ibeeto
+    IdentitiesOnly yes
+    User git
+
+Host github.com
+    User git
+    IdentityFile ~/.ssh/mt-github
+

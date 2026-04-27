@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-PROXMOX_SSH_TARGET="${PROXMOX_SSH_TARGET:-root@10.25.1.101}"
+PROXMOX_SSH_TARGET="${PROXMOX_SSH_TARGET:-root@10.25.1.207}"
 PROXMOX_SSH_KEY="${PROXMOX_SSH_KEY:-$HOME/.ssh/mickey}"
 PROXMOX_BRIDGE="${PROXMOX_BRIDGE:-vmbr0}"
 PROXMOX_STORAGE="${PROXMOX_STORAGE:-local-lvm}"
@@ -20,8 +20,8 @@ usage() {
   cat <<'EOF'
 usage: build-proxmox-templates.sh [--force]
 
-Builds the default Ubuntu 24.04 templates expected by envs/prod/terraform.tfvars.
-It can also build a single server template when BUILD_DESKTOP_TEMPLATE=0.
+Builds the default Ubuntu 24.04 server template expected by envs/prod/terraform.tfvars.
+It can also clone an optional desktop-flavored template when BUILD_DESKTOP_TEMPLATE=1.
 
 Environment overrides:
   PROXMOX_SSH_TARGET      SSH target for the Proxmox host

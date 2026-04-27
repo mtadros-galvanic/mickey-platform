@@ -3,14 +3,9 @@ output "generated_inventory_path" {
   value       = local_file.ansible_inventory.filename
 }
 
-output "control_vm_ip" {
-  description = "Control VM LAN IP."
-  value       = local.inventory_hosts[var.control_vm.name].ansible_host
-}
-
-output "desktop_vm_ip" {
-  description = "Desktop VM LAN IP."
-  value       = local.inventory_hosts[var.desktop_vm.name].ansible_host
+output "infra_vm_ip" {
+  description = "Infra VM LAN IP, when present in the active topology."
+  value       = try(local.inventory_hosts["mickey-infra"].ansible_host, null)
 }
 
 output "guest_vm_ips" {

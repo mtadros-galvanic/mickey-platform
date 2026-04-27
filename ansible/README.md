@@ -9,12 +9,13 @@ This directory owns the post-install host baseline and guest bootstrap for `mick
   - create and mount the `bulk` storage on the 4 TB disk
   - register the `bulk` directory storage with Proxmox
   - install CIFS client support and prepare the host-side `mickey-share` automount at `/mnt/mickey-share`
+  - install a pinned user-local Node 24 toolchain and the Codex CLI when the share is reachable
 - `playbooks/infra-vm.yml`
   - bootstrap the `mickey-infra` Ubuntu Server guest
   - install Docker, Samba, and guest-agent packages
   - detect, mount, and export the manually reattached share disk at `/srv/share`
   - normalize `/mnt/mickey-share` as a bind-mounted alias of `/srv/share`
-  - install a pinned user-local Node 16 toolchain and the Codex CLI
+  - install a pinned user-local Node 24 toolchain and the Codex CLI
   - point local Codex auth at the shared `mickey-share` copy when present
   - export the `mickey-share` Samba share
   - ensure the bootstrap user's password and `authorized_keys` are managed by Ansible
@@ -22,11 +23,11 @@ This directory owns the post-install host baseline and guest bootstrap for `mick
   - bootstrap the `mickey-erp` Ubuntu Server guest
   - ensure the bootstrap user's password and `authorized_keys` are managed by Ansible
   - install and enable a host-level Consul client joined to `mickey-infra`
-  - install `cifs-utils`, a pinned user-local Node 16 toolchain, the Codex CLI, and the guest-agent baseline
+  - install `cifs-utils`, a pinned user-local Node 24 toolchain, the Codex CLI, and the guest-agent baseline
   - persist the `mickey-share` SMB credential file and automount `/mnt/mickey-share`
   - point local Codex auth at the shared `mickey-share` copy when present
-- `playbooks/build-vm.yml`
-  - bootstrap build-focused guests such as `mickey-thud`
+- `playbooks/build-thud-vm.yml`
+  - bootstrap the legacy `mickey-thud` build guest
   - ensure the bootstrap user's password and `authorized_keys` are managed by Ansible
   - install and enable a host-level Consul client joined to `mickey-infra`
   - install a pinned user-local Node 16 toolchain and the Codex CLI
@@ -37,8 +38,21 @@ This directory owns the post-install host baseline and guest bootstrap for `mick
   - keep `mickey-share-mount` and `mickey-share-umount` as convenience wrappers
   - install a `mickey-yocto-fetch-diagnose` helper for source-specific fetch testing
   - install and enable the guest agent and SSH server baseline
+- `playbooks/build-scarthgap-vm.yml`
+  - bootstrap the modern `mickey-scarthgap` build guest
+  - ensure the bootstrap user's password and `authorized_keys` are managed by Ansible
+  - install and enable a host-level Consul client joined to `mickey-infra`
+  - install a pinned user-local Node 24 toolchain and the Codex CLI
+  - point local Codex auth at the shared `mickey-share` copy when present
+  - keep the guest SSH bundle scoped to GitHub access
+  - clone and update required GitHub build repos under `~/Projects`
+  - persist the `mickey-share` SMB credential file and automount `/mnt/mickey-share`
+  - keep `mickey-share-mount` and `mickey-share-umount` as convenience wrappers
+  - install a `mickey-yocto-fetch-diagnose` helper for source-specific fetch testing
+  - install and enable the guest agent and SSH server baseline
 - `playbooks/site.yml`
-  - imports the guest and host playbooks
+  - imports the normal Proxmox, infra, and ERP baselines
+  - does not run the build guest playbooks automatically because `mickey-thud` and `mickey-scarthgap` are operated explicitly
 
 ## Inventory
 
@@ -50,13 +64,19 @@ This directory owns the post-install host baseline and guest bootstrap for `mick
 
 Run guest playbooks with both inventories.
 
+## Dotfiles
+
+- Curated admin dotfiles are sourced from the sibling `../mickey-dotfiles` repo when it exists on the Ansible controller.
+- Runtime tool pins for managed hosts stay in `mickey-platform` Ansible variables; for example, tmux is installed as a pinned `/usr/local/bin/tmux` build while the tmux config still comes from `mickey-dotfiles`.
+- `ansible/files/dotfiles/` remains as a fallback snapshot and keeps the `mickey-platform`-specific `.zprofile` hook.
+
 
 ## Host-Specific SSH Keys
 
 - Optional host-only public keys can be tracked in `files/authorized_keys/<inventory_hostname>`.
 - Put one public key per line. Ansible merges that file with the shared `guests.ssh_public_keys` list and removes duplicates before writing `authorized_keys`.
 - Optional per-host SSH client files can be placed in `files/ssh/<inventory_hostname>/`.
-- Only private key files and `config` from that directory are copied to the guest user's `~/.ssh/` directory during `make ansible-build`.
+- Only private key files and `config` from that directory are copied to the guest user's `~/.ssh/` directory during `make ansible-build-thud` or `make ansible-build-scarthgap`.
 - `.pub` files in that directory are treated as local reference material and are not copied to the guest.
 - The `mickey-thud` bundle is intentionally GitHub-only because its managed repos are all hosted there.
 - The repo ignores private key files there by default, but keeps `config` trackable.

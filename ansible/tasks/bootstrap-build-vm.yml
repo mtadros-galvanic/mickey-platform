@@ -1,0 +1,365 @@
+---
+- name: Load secrets if provided
+  ansible.builtin.include_vars:
+    file: "{{ secret_vars_file }}"
+  when: secret_vars_file is defined
+
+- name: Fail when the Samba password is missing for the build share mount
+  ansible.builtin.fail:
+    msg: "samba.password must be present in the secrets file to configure the build share mount on build VMs."
+  when: >-
+    samba is not defined
+    or samba.password is not defined
+    or (samba.password | string | length) == 0
+
+- name: Build the bootstrap user's authorized key set
+  ansible.builtin.set_fact:
+    mickey_guest_authorized_keys: >-
+      {{
+        (
+          (guests.ssh_public_keys | default([]))
+          +
+          (
+            (
+              lookup(
+                'ansible.builtin.file',
+                (playbook_dir | dirname) ~ '/files/authorized_keys/' ~ inventory_hostname,
+                errors='ignore'
+              )
+              | default('', true)
+            ).splitlines()
+            | map('trim')
+            | reject('equalto', '')
+            | list
+          )
+        )
+        | unique
+      }}
+
+- name: Discover optional guest SSH bundle files
+  ansible.builtin.set_fact:
+    mickey_guest_ssh_bundle_files: []
+    mickey_guest_ssh_bundle_paths: >-
+      {{
+        lookup(
+          'ansible.builtin.fileglob',
+          ((playbook_dir | dirname) ~ '/files/ssh/' ~ inventory_hostname ~ '/*'),
+          wantlist=True
+        )
+        | reject('search', '/\\.gitignore$')
+        | reject('search', '\\.pub$')
+        | list
+      }}
+
+- name: Add shared SSH bundle files required by specific build guests
+  ansible.builtin.set_fact:
+    mickey_guest_ssh_bundle_paths: "{{ (mickey_guest_ssh_bundle_paths + mickey_guest_shared_ssh_bundle_paths) | unique }}"
+  vars:
+    mickey_guest_shared_ssh_bundle_paths: >-
+      {{
+        [
+          ((playbook_dir | dirname) ~ '/files/ssh/john-gitlab'),
+          ((playbook_dir | dirname) ~ '/files/ssh/gitlab.ibeeto')
+        ]
+        if inventory_hostname == 'mickey-thud'
+        else []
+      }}
+
+- name: Load optional guest SSH bundle file payloads
+  ansible.builtin.set_fact:
+    mickey_guest_ssh_bundle_files: >-
+      {{
+        mickey_guest_ssh_bundle_files
+        +
+        [
+          {
+            'name': (item | basename),
+            'content': (lookup('ansible.builtin.file', item, errors='ignore') | default('', true))
+          }
+        ]
+      }}
+  loop: "{{ mickey_guest_ssh_bundle_paths }}"
+  when: (mickey_guest_ssh_bundle_paths | length) > 0
+  no_log: true
+
+- name: Install build VM baseline packages
+  ansible.builtin.raw: |
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y {{ mickey_build_apt_packages | join(' ') }}
+
+- name: Ensure the bootstrap user has the configured password
+  ansible.builtin.raw: |
+    usermod --password {{ (guests.admin_password_hash | default(guests.extra_vm_admin_password_hash | default(''))) | quote }} {{ mickey_guest_admin_user | quote }}
+  when:
+    - guests is defined
+    - >-
+        (
+          guests.admin_password_hash is defined
+          and (guests.admin_password_hash | length) > 0
+        )
+        or
+        (
+          guests.extra_vm_admin_password_hash is defined
+          and (guests.extra_vm_admin_password_hash | length) > 0
+        )
+
+- name: Ensure the bootstrap user's authorized_keys matches the configured key set
+  ansible.builtin.raw: |
+    install -d -m 0700 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} /home/{{ mickey_guest_admin_user }}/.ssh
+    cat > /home/{{ mickey_guest_admin_user }}/.ssh/authorized_keys <<'EOF'
+    {% for ssh_key in mickey_guest_authorized_keys %}
+    {{ ssh_key }}
+    {% endfor %}
+    EOF
+    chown {{ mickey_guest_admin_user | quote }}:{{ mickey_guest_admin_user | quote }} /home/{{ mickey_guest_admin_user }}/.ssh/authorized_keys
+    chmod 0600 /home/{{ mickey_guest_admin_user }}/.ssh/authorized_keys
+  when:
+    - (mickey_guest_authorized_keys | length) > 0
+
+- name: Ensure optional SSH bundle files are present for the bootstrap user
+  ansible.builtin.raw: |
+    install -d -m 0700 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} /home/{{ mickey_guest_admin_user }}/.ssh
+    cat > /home/{{ mickey_guest_admin_user }}/.ssh/{{ item.name | quote }} <<'EOF'
+    {{ item.content }}
+    EOF
+    chown {{ mickey_guest_admin_user | quote }}:{{ mickey_guest_admin_user | quote }} /home/{{ mickey_guest_admin_user }}/.ssh/{{ item.name | quote }}
+    chmod 0600 /home/{{ mickey_guest_admin_user }}/.ssh/{{ item.name | quote }}
+  loop: "{{ mickey_guest_ssh_bundle_files }}"
+  when: (mickey_guest_ssh_bundle_files | length) > 0
+  no_log: true
+
+- name: Remove public key reference files from the bootstrap user's SSH bundle
+  ansible.builtin.raw: |
+    install -d -m 0700 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} /home/{{ mickey_guest_admin_user }}/.ssh
+    find /home/{{ mickey_guest_admin_user }}/.ssh -maxdepth 1 -type f -name '*.pub' -delete
+  changed_when: false
+
+- name: Remove stale GitLab-specific SSH bundle files from the bootstrap user's SSH directory
+  ansible.builtin.raw: |
+    rm -f /home/{{ mickey_guest_admin_user }}/.ssh/{{ item }}
+  loop:
+    - john-gitlab
+    - gitlab.ibeeto
+  when: item not in (mickey_guest_ssh_bundle_files | map(attribute='name') | list)
+  changed_when: false
+
+- name: Ensure GitHub is trusted for SSH repo access
+  ansible.builtin.raw: |
+    install -d -m 0700 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} /home/{{ mickey_guest_admin_user }}/.ssh
+    touch /home/{{ mickey_guest_admin_user }}/.ssh/known_hosts
+    chown {{ mickey_guest_admin_user | quote }}:{{ mickey_guest_admin_user | quote }} /home/{{ mickey_guest_admin_user }}/.ssh/known_hosts
+    chmod 0600 /home/{{ mickey_guest_admin_user }}/.ssh/known_hosts
+    if ! ssh-keygen -F github.com -f /home/{{ mickey_guest_admin_user }}/.ssh/known_hosts >/dev/null 2>&1; then
+      ssh-keyscan -H github.com >> /home/{{ mickey_guest_admin_user }}/.ssh/known_hosts
+    fi
+  changed_when: false
+
+- name: Ensure build tooling directories exist
+  ansible.builtin.raw: |
+    install -d -m 0755 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} {{ mickey_build_repo_root | quote }}
+
+- name: Ensure build share paths exist
+  ansible.builtin.raw: |
+    install -d -m 0755 /etc/mickey-platform
+    install -d -m 0770 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} {{ mickey_build_share_mount_path | quote }}
+
+- name: Install the build share credentials file
+  ansible.builtin.raw: |
+    cat > {{ mickey_build_share_credentials_path | quote }} <<'EOF'
+    username={{ mickey_build_share_mount_username }}
+    password={{ samba.password }}
+    EOF
+    chown root:root {{ mickey_build_share_credentials_path | quote }}
+    chmod 0600 {{ mickey_build_share_credentials_path | quote }}
+  no_log: true
+
+- name: Persist the build share automount in fstab
+  ansible.builtin.raw: |
+    set -eu
+    line="//{{ mickey_build_share_server }}/{{ mickey_build_share_name }} {{ mickey_build_share_mount_path }} cifs {{ mickey_build_share_fstab_options }} 0 0"
+    tmp="$(mktemp)"
+    trap 'rm -f "$tmp"' EXIT
+
+    if grep -Fqx "$line" /etc/fstab; then
+      exit 0
+    fi
+
+    grep -v " {{ mickey_build_share_mount_path }} cifs " /etc/fstab > "$tmp" || true
+    printf '%s\n' "$line" >> "$tmp"
+    cat "$tmp" > /etc/fstab
+    systemctl daemon-reload
+
+- name: Install the manual build share mount helper
+  ansible.builtin.raw: |
+    cat > {{ mickey_build_share_mount_command | quote }} <<'EOF'
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if [[ "${EUID}" -ne 0 ]]; then
+      echo "run with sudo: sudo mickey-share-mount" >&2
+      exit 1
+    fi
+
+    mount_point={{ mickey_build_share_mount_path | quote }}
+    owner={{ mickey_guest_admin_user | quote }}
+
+    install -d -m 0770 -o "$owner" -g "$owner" "$mount_point"
+
+    mount "$mount_point"
+    ls "$mount_point" >/dev/null
+    echo "mounted $mount_point"
+    EOF
+    chown root:root {{ mickey_build_share_mount_command | quote }}
+    chmod 0755 {{ mickey_build_share_mount_command | quote }}
+
+- name: Install the manual build share unmount helper
+  ansible.builtin.raw: |
+    cat > {{ mickey_build_share_umount_command | quote }} <<'EOF'
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if [[ "${EUID}" -ne 0 ]]; then
+      echo "run with sudo: sudo mickey-share-umount" >&2
+      exit 1
+    fi
+
+    mount_point={{ mickey_build_share_mount_path | quote }}
+
+    if ! mountpoint -q "$mount_point"; then
+      echo "$mount_point is not mounted"
+      exit 0
+    fi
+
+    umount "$mount_point"
+    echo "unmounted $mount_point"
+    EOF
+    chown root:root {{ mickey_build_share_umount_command | quote }}
+    chmod 0755 {{ mickey_build_share_umount_command | quote }}
+
+- name: Mount the build share now that the fstab entry exists
+  ansible.builtin.raw: |
+    mount_point={{ mickey_build_share_mount_path | quote }}
+    if mountpoint -q "$mount_point"; then
+      options="$(findmnt -no OPTIONS --target "$mount_point" || true)"
+      if printf '%s\n' "$options" | grep -qw mfsymlinks; then
+        mount -o remount "$mount_point"
+        exit 0
+      fi
+      umount "$mount_point"
+    fi
+    mount "$mount_point"
+  changed_when: false
+
+- name: Install the Consul client baseline for build guests
+  ansible.builtin.include_tasks: ../tasks/install-consul-client.yml
+
+- name: Install Codex tooling for build guests
+  ansible.builtin.include_tasks: ../tasks/install-codex-cli.yml
+
+- name: Point build guests at the shared Codex auth file when present
+  ansible.builtin.include_tasks: ../tasks/configure-codex-auth.yml
+
+- name: Install the curated admin dotfiles on build guests
+  ansible.builtin.include_tasks: ../tasks/configure-admin-dotfiles.yml
+
+- name: Install the Yocto fetch diagnosis helper
+  ansible.builtin.raw: |
+    cat > {{ mickey_build_yocto_diagnose_command | quote }} <<'EOF'
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    target_url="${1:-{{ mickey_build_yocto_target_url }}}"
+    control_url="${2:-{{ mickey_build_yocto_control_url }}}"
+    max_time="${MAX_TIME:-20}"
+
+    show_dns() {
+      local url="$1"
+      local host=""
+
+      host="$(printf '%s\n' "$url" | awk -F/ 'NF >= 3 { print $3 }')"
+      if [[ -z "$host" ]]; then
+        echo "unable to extract a hostname from: $url"
+        return 0
+      fi
+
+      echo "resolved addresses for $host"
+      getent ahostsv4 "$host" 2>/dev/null || getent ahosts "$host" 2>/dev/null || echo "resolution failed"
+    }
+
+    probe() {
+      local label="$1"
+      local url="$2"
+
+      echo "== $label =="
+      echo "url=$url"
+      show_dns "$url"
+      curl -L \
+        --output /dev/null \
+        --silent \
+        --show-error \
+        --write-out $'http_code=%{http_code}\nremote_ip=%{remote_ip}\ntime_namelookup=%{time_namelookup}\ntime_connect=%{time_connect}\ntime_appconnect=%{time_appconnect}\ntime_starttransfer=%{time_starttransfer}\ntime_total=%{time_total}\nsize_download=%{size_download}\nspeed_download=%{speed_download}\n' \
+        --max-time "$max_time" \
+        "$url" || true
+      echo
+    }
+
+    echo "resolver configuration"
+    cat /etc/resolv.conf
+    echo
+
+    if command -v resolvectl >/dev/null 2>&1; then
+      resolvectl status || true
+      echo
+    elif command -v systemd-resolve >/dev/null 2>&1; then
+      systemd-resolve --status || true
+      echo
+    fi
+
+    probe "target" "$target_url"
+    probe "control" "$control_url"
+    EOF
+    chown root:root {{ mickey_build_yocto_diagnose_command | quote }}
+    chmod 0755 {{ mickey_build_yocto_diagnose_command | quote }}
+
+- name: Ensure required build repos are available
+  ansible.builtin.raw: |
+    set -eu
+    repo_dir="{{ mickey_build_repo_root }}/{{ item.name }}"
+    repo_url="{{ item.url }}"
+    git_ssh_command="ssh -F /home/{{ mickey_guest_admin_user }}/.ssh/config"
+
+    if [ -d "$repo_dir" ] && [ ! -d "$repo_dir/.git" ]; then
+      echo "refusing to clone into non-git directory: $repo_dir" >&2
+      exit 1
+    fi
+
+    if [ ! -d "$repo_dir/.git" ]; then
+      su - {{ mickey_guest_admin_user }} -c "GIT_SSH_COMMAND='$git_ssh_command' git clone '$repo_url' '$repo_dir'"
+      exit 0
+    fi
+
+    su - {{ mickey_guest_admin_user }} -c "git -C '$repo_dir' remote set-url origin '$repo_url'"
+    su - {{ mickey_guest_admin_user }} -c "GIT_SSH_COMMAND='$git_ssh_command' git -C '$repo_dir' fetch --all --prune"
+    su - {{ mickey_guest_admin_user }} -c "git -C '$repo_dir' remote set-head origin -a >/dev/null 2>&1 || true"
+
+    default_branch="$(su - {{ mickey_guest_admin_user }} -c "git -C '$repo_dir' symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@'")"
+    if [ -z "$default_branch" ]; then
+      default_branch="$(su - {{ mickey_guest_admin_user }} -c "git -C '$repo_dir' rev-parse --abbrev-ref HEAD")"
+    fi
+
+    current_branch="$(su - {{ mickey_guest_admin_user }} -c "git -C '$repo_dir' rev-parse --abbrev-ref HEAD")"
+    repo_dirty="$(su - {{ mickey_guest_admin_user }} -c "git -C '$repo_dir' status --porcelain")"
+
+    if [ "$current_branch" = "$default_branch" ] && [ -z "$repo_dirty" ]; then
+      su - {{ mickey_guest_admin_user }} -c "GIT_SSH_COMMAND='$git_ssh_command' git -C '$repo_dir' pull --ff-only origin '$default_branch'"
+    else
+      echo "leaving $repo_dir unchanged because it is not on the default branch or has local changes"
+    fi
+  loop: "{{ mickey_build_git_repos }}"
+  when: mickey_build_enable_repo_clones | default(false) | bool
+
+- name: Enable the guest agent and SSH service
+  ansible.builtin.raw: |
+    systemctl enable --now qemu-guest-agent
+    systemctl enable --now ssh

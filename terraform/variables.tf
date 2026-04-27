@@ -109,6 +109,7 @@ variable "vms" {
     vm_id                = number
     cpu_cores            = number
     memory_mb            = number
+    memory_balloon_mb    = optional(number)
     os_disk_gb           = number
     os_disk_datastore_id = optional(string)
     lan_ipv4_cidr        = string

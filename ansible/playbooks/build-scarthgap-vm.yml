@@ -1,0 +1,163 @@
+---
+- name: Bootstrap the Mickey scarthgap build VM
+  hosts: mickey-scarthgap
+  become: true
+  gather_facts: false
+
+  vars:
+    mickey_build_share_mount_username: "{{ (samba.username | default(mickey_guest_admin_user)) if (samba is defined) else mickey_guest_admin_user }}"
+    mickey_codex_node_version: "24.15.0"
+    mickey_build_apt_packages:
+      - bubblewrap
+      - build-essential
+      - ca-certificates
+      - cifs-utils
+      - chrpath
+      - cpio
+      - curl
+      - debianutils
+      - device-tree-compiler
+      - diffstat
+      - file
+      - gawk
+      - gcc
+      - git
+      - iputils-ping
+      - libacl1
+      - liblz4-tool
+      - locales
+      - minicom
+      - openssh-server
+      - python3
+      - python3-git
+      - python3-jinja2
+      - python3-pexpect
+      - python3-pip
+      - python3-subunit
+      - qemu-guest-agent
+      - screen
+      - socat
+      - texinfo
+      - tree
+      - unzip
+      - wget
+      - xz-utils
+      - zstd
+      - android-tools-fastboot
+      - android-tools-adb
+    mickey_build_git_repos:
+      - name: "Protech"
+        url: "git@github.com:GalvanicAppliedSciences/Protech.git"
+    mickey_build_absent_git_repos:
+      - "accuchrome-gc5-wl"
+      - "Acculase6"
+      - "Yocto-Thud-Documentation"
+    mickey_build_yocto_locale: "en_US.UTF-8"
+    mickey_build_repo_tool_path: /usr/local/bin/repo
+    mickey_build_uuu_path: /usr/local/bin/uuu
+    mickey_build_uuu_url: https://github.com/nxp-imx/mfgtools/releases/download/uuu_1.5.201/uuu
+    mickey_build_dey_dir: /usr/local/dey-5.0
+    mickey_build_protech_repo_dir: "/home/{{ mickey_guest_admin_user }}/Projects/Protech"
+
+  handlers:
+    - name: Validate Consul client config
+      ansible.builtin.raw: |
+        consul validate {{ mickey_consul_config_dir_effective | quote }}
+
+    - name: Restart Consul client
+      ansible.builtin.raw: |
+        systemctl restart consul
+
+  tasks:
+    - name: Run the shared build VM bootstrap for mickey-scarthgap
+      ansible.builtin.include_tasks: ../tasks/bootstrap-build-vm.yml
+
+    - name: Remove the Thud-specific repo clones from mickey-scarthgap
+      ansible.builtin.raw: |
+        set -eu
+        repo_dir="{{ mickey_build_repo_root }}/{{ item }}"
+
+        if [ ! -e "$repo_dir" ]; then
+          exit 0
+        fi
+
+        if [ ! -d "$repo_dir/.git" ]; then
+          echo "refusing to remove non-git directory: $repo_dir" >&2
+          exit 1
+        fi
+
+        repo_dirty="$(su - {{ mickey_guest_admin_user }} -c "git -C '$repo_dir' status --porcelain")"
+        if [ -n "$repo_dirty" ]; then
+          echo "refusing to remove dirty repo: $repo_dir" >&2
+          exit 1
+        fi
+
+        rm -rf "$repo_dir"
+        echo changed
+      loop: "{{ mickey_build_absent_git_repos }}"
+      register: mickey_build_absent_repo_results
+      changed_when: "'changed' in mickey_build_absent_repo_results.stdout"
+
+    - name: Ensure the Yocto locale exists on mickey-scarthgap
+      ansible.builtin.raw: |
+        set -eu
+        if locale -a | tr '[:upper:]' '[:lower:]' | grep -qx '{{ mickey_build_yocto_locale | lower | regex_escape() }}'; then
+          exit 0
+        fi
+
+        if ! grep -qx '{{ mickey_build_yocto_locale }} UTF-8' /etc/locale.gen; then
+          printf '%s\n' '{{ mickey_build_yocto_locale }} UTF-8' >> /etc/locale.gen
+        fi
+
+        locale-gen {{ mickey_build_yocto_locale }}
+        echo changed
+      register: mickey_build_locale_result
+      changed_when: "'changed' in mickey_build_locale_result.stdout"
+
+    - name: Ensure the bootstrap user can access serial devices for flashing
+      ansible.builtin.raw: |
+        set -eu
+        getent group plugdev >/dev/null 2>&1 || groupadd plugdev
+        usermod -aG dialout,plugdev {{ mickey_guest_admin_user }}
+      changed_when: false
+
+    - name: Install the repo tool used by Digi Embedded Yocto
+      ansible.builtin.raw: |
+        set -eu
+        if [ -x {{ mickey_build_repo_tool_path | quote }} ] && {{ mickey_build_repo_tool_path | quote }} --version >/dev/null 2>&1; then
+          exit 0
+        fi
+
+        tmp="$(mktemp)"
+        trap 'rm -f "$tmp"' EXIT
+        curl --fail --silent --show-error --location https://storage.googleapis.com/git-repo-downloads/repo -o "$tmp"
+        install -D -m 0755 -o root -g root "$tmp" {{ mickey_build_repo_tool_path | quote }}
+        echo changed
+      register: mickey_build_repo_tool_result
+      changed_when: "'changed' in mickey_build_repo_tool_result.stdout"
+
+    - name: Install the uuu flashing helper
+      ansible.builtin.raw: |
+        set -eu
+        if [ -x {{ mickey_build_uuu_path | quote }} ] && {{ mickey_build_uuu_path | quote }} -V >/dev/null 2>&1; then
+          exit 0
+        fi
+
+        tmp="$(mktemp)"
+        trap 'rm -f "$tmp"' EXIT
+        curl --fail --silent --show-error --location {{ mickey_build_uuu_url | quote }} -o "$tmp"
+        install -D -m 0755 -o root -g root "$tmp" {{ mickey_build_uuu_path | quote }}
+        echo changed
+      register: mickey_build_uuu_result
+      changed_when: "'changed' in mickey_build_uuu_result.stdout"
+
+    - name: Ensure the DEY checkout root exists and is writable by the bootstrap user
+      ansible.builtin.raw: |
+        install -d -m 0775 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} {{ mickey_build_dey_dir | quote }}
+      changed_when: false
+
+    - name: Bootstrap the Digi Embedded Yocto checkout for Protech
+      ansible.builtin.raw: |
+        set -eu
+        su - {{ mickey_guest_admin_user }} -c "WORKSPACE='{{ mickey_build_protech_repo_dir }}' DEY_DIR='{{ mickey_build_dey_dir }}' REPO_BIN='{{ mickey_build_repo_tool_path }}' bash '{{ mickey_build_protech_repo_dir }}/tools/yocto/scripts/bootstrap_dey.sh'"
+      changed_when: false

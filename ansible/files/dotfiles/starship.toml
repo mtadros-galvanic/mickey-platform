@@ -1,0 +1,211 @@
+"$schema" = 'https://starship.rs/config-schema.json'
+
+# ========================================
+# Prompt layout
+# Philosophy:
+# - Line 1: identity, location, repo, infra risk
+# - Line 2: execution context and status
+# ========================================
+
+format = """
+$os\
+$username\
+$directory\
+$git_branch\
+$git_status\
+$docker_context\
+$line_break\
+$container\
+$hostname\
+$sudo\
+$cmd_duration\
+$character
+"""
+
+palette = 'catppuccin_mocha'
+
+# ========================================
+# Identity
+# ========================================
+
+[os]
+disabled = false
+style = "fg:red"
+format = "[$symbol]($style) "
+
+[os.symbols]
+Macos = "󰀵"
+Linux = "󰌽"
+Ubuntu = "󰕈"
+Debian = "󰣚"
+Arch = "󰣇"
+Fedora = "󰣛"
+Alpine = ""
+Windows = ""
+
+[username]
+show_always = true
+style_user = "fg:red"
+style_root = "fg:red"
+format = '[$user]($style) '
+
+# ========================================
+# Location
+# ========================================
+
+[directory]
+style = "fg:peach"
+format = "[$path]($style) "
+truncation_length = 3
+truncation_symbol = "…/"
+
+[directory.substitutions]
+"Documents" = "󰈙 "
+"Downloads" = " "
+"Music" = "󰝚 "
+"Pictures" = " "
+"Developer" = "󰲋 "
+
+# ========================================
+# Git
+# ========================================
+
+[git_branch]
+symbol = ""
+style = "fg:yellow"
+format = '[$symbol $branch]($style) '
+
+[git_status]
+style = "fg:yellow"
+format = '[$all_status$ahead_behind]($style) '
+
+# ========================================
+# Docker / Devcontainer context
+# ========================================
+
+[docker_context]
+symbol = ""
+style = "fg:sapphire"
+format = '[$symbol $context]($style) '
+
+[container]
+style = "fg:lavender"
+format = '[$symbol $name]($style) '
+
+# ========================================
+# Remote / privilege indicators
+# ========================================
+
+[hostname]
+ssh_symbol = "❮=❯ "
+style = "fg:lavender"
+format = '[$ssh_symbol$hostname]($style) '
+
+[sudo]
+disabled = false
+symbol = "⚠️"
+style = "fg:lavender"
+format = "[$symbol]($style) "
+
+# ========================================
+# Command feedback
+# ========================================
+
+[cmd_duration]
+show_milliseconds = true
+format = " in $duration "
+style = "fg:lavender"
+disabled = false
+show_notifications = false
+min_time_to_notify = 45000
+
+[character]
+success_symbol = '[❯](bold fg:green)'
+error_symbol   = '[❯](bold fg:red)'
+vimcmd_symbol  = '[❮](bold fg:green)'
+
+[line_break]
+disabled = false
+
+# ========================================
+# Explicitly disable unused modules
+# ========================================
+
+[c]
+disabled = true
+[rust]
+disabled = true
+[golang]
+disabled = true
+[nodejs]
+disabled = true
+[php]
+disabled = true
+[java]
+disabled = true
+[kotlin]
+disabled = true
+[haskell]
+disabled = true
+[python]
+disabled = true
+[time]
+disabled = true
+[aws]
+disabled = true
+[kubernetes]
+disabled = true
+[pulumi]
+disabled = true
+[gcloud]
+disabled = true
+[conda]
+disabled = true
+
+# ========================================
+# Catppuccin palettes
+# ========================================
+
+[palettes.catppuccin_mocha]
+rosewater = "#f5e0dc"
+flamingo  = "#f2cdcd"
+pink      = "#f5c2e7"
+mauve     = "#cba6f7"
+red       = "#f38ba8"
+peach     = "#fab387"
+yellow    = "#f9e2af"
+green     = "#a6e3a1"
+teal      = "#94e2d5"
+sky       = "#89dceb"
+sapphire  = "#74c7ec"
+blue      = "#89b4fa"
+lavender  = "#b4befe"
+text      = "#cdd6f4"
+surface0  = "#313244"
+surface1  = "#45475a"
+surface2  = "#585b70"
+base      = "#1e1e2e"
+mantle    = "#181825"
+crust     = "#11111b"
+
+[palettes.catppuccin_latte]
+rosewater = "#dc8a78"
+flamingo  = "#dd7878"
+pink      = "#ea76cb"
+mauve     = "#8839ef"
+red       = "#d20f39"
+peach     = "#fe640b"
+yellow    = "#df8e1d"
+green     = "#40a02b"
+teal      = "#179299"
+sky       = "#04a5e5"
+sapphire  = "#209fb5"
+blue      = "#1e66f5"
+lavender  = "#7287fd"
+text      = "#4c4f69"
+surface0  = "#ccd0da"
+surface1  = "#bcc0cc"
+surface2  = "#acb0be"
+base      = "#eff1f5"
+mantle    = "#e6e9ef"
+crust     = "#dce0e8"

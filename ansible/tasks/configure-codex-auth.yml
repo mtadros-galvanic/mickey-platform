@@ -1,7 +1,11 @@
 ---
 - name: Ensure the local Codex home exists
-  ansible.builtin.raw: |
-    install -d -m 0700 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} {{ mickey_codex_local_home | quote }}
+  ansible.builtin.file:
+    path: "{{ mickey_codex_local_home }}"
+    state: directory
+    owner: "{{ mickey_guest_admin_user }}"
+    group: "{{ mickey_guest_admin_user }}"
+    mode: "0700"
   when: mickey_codex_enable | default(false) | bool
 
 - name: Seed the shared Codex home from the legacy shell path when moving to mickey-share
@@ -35,8 +39,11 @@
           cp -R --no-preserve=mode,ownership,timestamps "$entry" "$codex_home"/
         done
         chown -R {{ mickey_guest_admin_user | quote }}:{{ mickey_guest_admin_user | quote }} "$codex_home"
+        echo changed
       fi
     fi
+  register: mickey_codex_seed_home_result
+  changed_when: "'changed' in mickey_codex_seed_home_result.stdout"
   when: mickey_codex_enable | default(false) | bool
 
 - name: Point the shell-visible .codex path at the shared Codex home
@@ -62,6 +69,9 @@
     fi
     ln -s "$codex_home" "$shell_home"
     chown -h {{ mickey_guest_admin_user | quote }}:{{ mickey_guest_admin_user | quote }} "$shell_home"
+    echo changed
+  register: mickey_codex_shell_link_result
+  changed_when: "'changed' in mickey_codex_shell_link_result.stdout"
   when: mickey_codex_enable | default(false) | bool
 
 - name: Detect whether the shared Codex auth file exists
@@ -97,6 +107,9 @@
 
     ln -s "$shared_auth" "$local_auth"
     chown -h {{ mickey_guest_admin_user | quote }}:{{ mickey_guest_admin_user | quote }} "$local_auth"
+    echo changed
+  register: mickey_codex_auth_link_result
+  changed_when: "'changed' in mickey_codex_auth_link_result.stdout"
   when:
     - mickey_codex_enable | default(false) | bool
     - mickey_codex_shared_auth_enable | default(false) | bool
@@ -104,14 +117,40 @@
 
 - name: Reconcile the local Codex auth path with the shared auth copy
   ansible.builtin.raw: |
+    set -eu
+    shared_auth={{ mickey_codex_shared_auth_path | quote }}
+    local_auth={{ mickey_codex_local_auth_path | quote }}
+    before_auth=""
+    after_auth=""
+    before_link="$(readlink "$local_auth" 2>/dev/null || true)"
+
+    if [ -f "$shared_auth" ]; then
+      before_auth="$(sha256sum "$shared_auth" | awk '{print $1}')"
+    fi
+
     {{ mickey_codex_sync_script_path }}
+
+    after_link="$(readlink "$local_auth" 2>/dev/null || true)"
+    if [ -f "$shared_auth" ]; then
+      after_auth="$(sha256sum "$shared_auth" | awk '{print $1}')"
+    fi
+
+    if [ "$before_auth" != "$after_auth" ] || [ "$before_link" != "$after_link" ]; then
+      echo changed
+    fi
+  register: mickey_codex_auth_sync_result
+  changed_when: "'changed' in mickey_codex_auth_sync_result.stdout"
   when:
     - mickey_codex_enable | default(false) | bool
     - mickey_codex_shared_auth_enable | default(false) | bool
 
 - name: Ensure the shared Codex skills directory exists
-  ansible.builtin.raw: |
-    install -d -m 0770 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} {{ mickey_codex_shared_skills_path | quote }}
+  ansible.builtin.file:
+    path: "{{ mickey_codex_shared_skills_path }}"
+    state: directory
+    owner: "{{ mickey_guest_admin_user }}"
+    group: "{{ mickey_guest_admin_user }}"
+    mode: "0770"
   when:
     - mickey_codex_enable | default(false) | bool
     - mickey_codex_shared_auth_enable | default(false) | bool
@@ -136,6 +175,9 @@
       cp -R --no-preserve=mode,ownership,timestamps "$entry" "$shared_skills"/
     done
     chown -R {{ mickey_guest_admin_user | quote }}:{{ mickey_guest_admin_user | quote }} "$shared_skills"
+    echo changed
+  register: mickey_codex_seed_skills_result
+  changed_when: "'changed' in mickey_codex_seed_skills_result.stdout"
   when:
     - mickey_codex_enable | default(false) | bool
     - mickey_codex_shared_auth_enable | default(false) | bool
@@ -163,6 +205,9 @@
 
     ln -s "$shared_skills" "$local_skills"
     chown -h {{ mickey_guest_admin_user | quote }}:{{ mickey_guest_admin_user | quote }} "$local_skills"
+    echo changed
+  register: mickey_codex_skills_link_result
+  changed_when: "'changed' in mickey_codex_skills_link_result.stdout"
   when:
     - mickey_codex_enable | default(false) | bool
     - mickey_codex_shared_auth_enable | default(false) | bool
@@ -170,6 +215,7 @@
 - name: Restore a local Codex auth file from backup when shared auth is disabled
   ansible.builtin.raw: |
     set -eu
+    changed=0
     local_auth={{ mickey_codex_local_auth_path | quote }}
     backup_auth={{ mickey_codex_local_auth_backup_path | quote }}
     shell_auth={{ (mickey_codex_shell_home ~ '/auth.json') | quote }}
@@ -179,6 +225,7 @@
 
     if [ -L "$local_auth" ] || [ ! -e "$local_auth" ]; then
       rm -f "$local_auth"
+      changed=1
       if [ -f "$backup_auth" ]; then
         cp -f "$backup_auth" "$local_auth"
       elif [ -n "$resolved_auth" ] && [ -f "$resolved_auth" ]; then
@@ -196,6 +243,11 @@
       chown {{ mickey_guest_admin_user | quote }}:{{ mickey_guest_admin_user | quote }} "$local_auth"
       chmod 0600 "$local_auth"
     fi
+    if [ "$changed" -eq 1 ]; then
+      echo changed
+    fi
+  register: mickey_codex_restore_auth_result
+  changed_when: "'changed' in mickey_codex_restore_auth_result.stdout"
   when:
     - mickey_codex_enable | default(false) | bool
     - not (mickey_codex_shared_auth_enable | default(false) | bool)

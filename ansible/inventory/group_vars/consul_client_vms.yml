@@ -1,5 +1,6 @@
 mickey_consul_server_address: "{{ hostvars['mickey-infra'].ansible_host | default('10.25.1.206') }}"
-mickey_consul_datacenter: mickey
+# The live infra Consul server currently runs in Docker with the default dc1 datacenter.
+mickey_consul_datacenter: dc1
 mickey_consul_config_dir: /etc/consul.d
 mickey_consul_config_file: "{{ mickey_consul_config_dir }}/consul.hcl"
 mickey_consul_data_dir: /var/lib/consul

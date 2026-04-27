@@ -3,7 +3,7 @@ mickey_guest_admin_home: "{{ '/root' if mickey_guest_admin_user == 'root' else '
 
 mickey_shared_mount_path: /mnt/mickey-share
 
-mickey_codex_node_version: "16.20.2"
+# Playbooks that install Codex set mickey_codex_node_version explicitly.
 mickey_codex_node_arch: "linux-x64"
 mickey_codex_node_archive_name: "node-v{{ mickey_codex_node_version }}-{{ mickey_codex_node_arch }}"
 mickey_codex_node_install_root: "{{ mickey_guest_admin_home }}/.local/opt"
@@ -15,6 +15,9 @@ mickey_codex_shell_backup_home: "{{ mickey_guest_admin_home }}/.codex.local-pre-
 mickey_codex_shared_root: "{{ mickey_shared_mount_path }}/admin/codex"
 mickey_codex_hosts_root: "{{ mickey_codex_shared_root }}/hosts"
 mickey_codex_local_home: "{{ mickey_codex_hosts_root }}/{{ inventory_hostname }}"
+mickey_codex_local_state_root: "{{ mickey_guest_admin_home }}/.local/state/codex"
+mickey_codex_local_tmp_path: "{{ mickey_codex_local_state_root }}/tmp"
+mickey_codex_tmp_mount_path: "{{ mickey_codex_local_home }}/tmp"
 mickey_codex_local_auth_path: "{{ mickey_codex_local_home }}/auth.json"
 mickey_codex_local_auth_backup_path: "{{ mickey_codex_local_home }}/auth.json.local-backup"
 mickey_codex_local_skills_path: "{{ mickey_codex_local_home }}/skills"
@@ -28,5 +31,26 @@ mickey_codex_shared_auth_path: "{{ mickey_codex_shared_root }}/auth.json"
 mickey_codex_shared_skills_path: "{{ mickey_codex_shared_root }}/skills"
 mickey_codex_shared_auth_enable: true
 mickey_codex_package: "@openai/codex"
-mickey_codex_version: "0.122.0"
+mickey_codex_version: "0.125.0"
 mickey_codex_enable: true
+
+mickey_dotfiles_enable: true
+mickey_dotfiles_packages:
+  - tmux
+  - zsh
+mickey_dotfiles_set_default_shell: true
+mickey_dotfiles_default_shell: /usr/bin/zsh
+mickey_dotfiles_tmux_version: "3.6a"
+mickey_dotfiles_tmux_release_arch_map:
+  x86_64: linux-x86_64
+  amd64: linux-x86_64
+  aarch64: linux-arm64
+  arm64: linux-arm64
+mickey_dotfiles_tmux_archive_checksum_map:
+  linux-x86_64: "sha256:c0a772a5e6ca8f129b0111d10029a52e02bcbc8352d5a8c0d3de8466a1e59c2e"
+  linux-arm64: "sha256:bb5afd9d646df54a7d7c66e198aa22c7d293c7453534f1670f7c540534db8b5e"
+mickey_dotfiles_tmux_bin_path: /usr/local/bin/tmux
+mickey_dotfiles_starship_version: "1.25.0"
+mickey_dotfiles_starship_asset_name: starship-x86_64-unknown-linux-musl.tar.gz
+mickey_dotfiles_starship_archive_url: "https://github.com/starship/starship/releases/download/v{{ mickey_dotfiles_starship_version }}/{{ mickey_dotfiles_starship_asset_name }}"
+mickey_dotfiles_starship_bin_path: /usr/local/bin/starship

@@ -1,5 +1,5 @@
 [global]
-   workgroup = {{ mickey_desktop_share_workgroup }}
+   workgroup = {{ mickey_share_workgroup }}
    server role = standalone server
    map to guest = never
    security = user
@@ -8,9 +8,12 @@
    unix password sync = no
    log file = /var/log/samba/%m.log
    max log size = 1000
+{% if mickey_share_allowed_hosts is defined and (mickey_share_allowed_hosts | length) > 0 %}
+   hosts allow = {{ mickey_share_allowed_hosts | join(' ') }}
+{% endif %}
 
-[{{ mickey_desktop_share_name }}]
-   path = {{ mickey_desktop_share_mount_path }}
+[{{ mickey_share_name }}]
+   path = {{ mickey_share_mount_path }}
    browseable = yes
    read only = no
    guest ok = no

@@ -77,6 +77,7 @@ resource "proxmox_virtual_environment_vm" "mickey" {
 
   memory {
     dedicated = each.value.memory_mb
+    floating  = each.value.memory_balloon_mb
   }
 
   disk {

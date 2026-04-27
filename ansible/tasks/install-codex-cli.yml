@@ -1,15 +1,83 @@
 ---
+- name: Confirm the playbook selected a Codex Node version
+  ansible.builtin.assert:
+    that:
+      - mickey_codex_node_version is defined
+      - (mickey_codex_node_version | string | length) > 0
+    fail_msg: "Playbooks that include install-codex-cli.yml must define mickey_codex_node_version explicitly."
+  when: mickey_codex_enable | default(false) | bool
+
 - name: Ensure Codex tooling directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ mickey_guest_admin_user }}"
+    group: "{{ mickey_guest_admin_user }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ mickey_guest_admin_home }}/.local"
+      mode: "0755"
+    - path: "{{ mickey_codex_local_bin_dir }}"
+      mode: "0755"
+    - path: "{{ mickey_codex_node_install_root }}"
+      mode: "0755"
+    - path: "{{ mickey_guest_admin_home }}/.local/lib"
+      mode: "0755"
+    - path: "{{ mickey_codex_local_state_root }}"
+      mode: "0700"
+    - path: "{{ mickey_codex_local_tmp_path }}"
+      mode: "0700"
+    - path: "{{ mickey_codex_local_home }}"
+      mode: "0700"
+  when: mickey_codex_enable | default(false) | bool
+
+- name: Persist the local Codex tmp bind mount in fstab
   ansible.builtin.raw: |
-    install -d -m 0755 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} {{ (mickey_guest_admin_home ~ '/.local') | quote }}
-    install -d -m 0755 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} {{ mickey_codex_local_bin_dir | quote }}
-    install -d -m 0755 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} {{ mickey_codex_node_install_root | quote }}
-    install -d -m 0755 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} {{ (mickey_guest_admin_home ~ '/.local/lib') | quote }}
-    install -d -m 0700 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} {{ mickey_codex_local_home | quote }}
+    set -eu
+    line="{{ mickey_codex_local_tmp_path }} {{ mickey_codex_tmp_mount_path }} none bind 0 0"
+    tmp="$(mktemp)"
+    trap 'rm -f "$tmp"' EXIT
+
+    if grep -Fqx "$line" /etc/fstab; then
+      exit 0
+    fi
+
+    grep -v " {{ mickey_codex_tmp_mount_path }} none bind " /etc/fstab > "$tmp" || true
+    printf '%s\n' "$line" >> "$tmp"
+    cat "$tmp" > /etc/fstab
+    systemctl daemon-reload
+    echo changed
+  register: mickey_codex_tmp_fstab_result
+  changed_when: "'changed' in mickey_codex_tmp_fstab_result.stdout"
+  when: mickey_codex_enable | default(false) | bool
+
+- name: Mount the local Codex tmp bind mount
+  ansible.builtin.raw: |
+    set -eu
+    target={{ mickey_codex_tmp_mount_path | quote }}
+    source={{ mickey_codex_local_tmp_path | quote }}
+
+    install -d -m 0700 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} "$source"
+    install -d -m 0700 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} "$target"
+
+    if mountpoint -q "$target"; then
+      current_source="$(findmnt -no SOURCE --target "$target" || true)"
+      if [ "$current_source" = "$source" ]; then
+        exit 0
+      fi
+      umount "$target"
+    fi
+
+    mount "$target"
+    echo changed
+  register: mickey_codex_tmp_mount_result
+  changed_when: "'changed' in mickey_codex_tmp_mount_result.stdout"
+  when: mickey_codex_enable | default(false) | bool
 
 - name: Install the pinned Node.js runtime for Codex
   ansible.builtin.raw: |
     set -eu
+    changed=0
     archive="/tmp/{{ mickey_codex_node_archive_name }}.tar.xz"
     if [ "$({{ mickey_codex_node_install_dir }}/bin/node -v 2>/dev/null || true)" != "v{{ mickey_codex_node_version }}" ]; then
       rm -rf {{ mickey_codex_node_install_dir | quote }}
@@ -17,64 +85,130 @@
       tar -xJf "$archive" -C {{ mickey_codex_node_install_root | quote }}
       chown -R {{ mickey_guest_admin_user | quote }}:{{ mickey_guest_admin_user | quote }} {{ mickey_codex_node_install_dir | quote }}
       rm -f "$archive"
+      changed=1
     fi
-    ln -sfn {{ mickey_codex_node_install_dir }}/bin/node {{ mickey_codex_local_bin_dir }}/node
-    ln -sfn {{ mickey_codex_node_install_dir }}/bin/npm {{ mickey_codex_local_bin_dir }}/npm
-    ln -sfn {{ mickey_codex_node_install_dir }}/bin/npx {{ mickey_codex_local_bin_dir }}/npx
-    ln -sfn {{ mickey_codex_local_bin_dir }}/node /usr/local/bin/node
-    ln -sfn {{ mickey_codex_local_bin_dir }}/npm /usr/local/bin/npm
-    ln -sfn {{ mickey_codex_local_bin_dir }}/npx /usr/local/bin/npx
+    for pair in \
+      "{{ mickey_codex_node_install_dir }}/bin/node|{{ mickey_codex_local_bin_dir }}/node" \
+      "{{ mickey_codex_node_install_dir }}/bin/npm|{{ mickey_codex_local_bin_dir }}/npm" \
+      "{{ mickey_codex_node_install_dir }}/bin/npx|{{ mickey_codex_local_bin_dir }}/npx" \
+      "{{ mickey_codex_local_bin_dir }}/node|/usr/local/bin/node" \
+      "{{ mickey_codex_local_bin_dir }}/npm|/usr/local/bin/npm" \
+      "{{ mickey_codex_local_bin_dir }}/npx|/usr/local/bin/npx"
+    do
+      src="${pair%%|*}"
+      dst="${pair##*|}"
+      if [ "$(readlink "$dst" 2>/dev/null || true)" != "$src" ]; then
+        ln -sfn "$src" "$dst"
+        changed=1
+      fi
+    done
+    if [ "$changed" -eq 1 ]; then
+      echo changed
+    fi
+  register: mickey_codex_node_result
+  changed_when: "'changed' in mickey_codex_node_result.stdout"
   when: mickey_codex_enable | default(false) | bool
 
 - name: Install Codex CLI for the guest user
   ansible.builtin.raw: |
     set -eu
-    current_version="$({{ mickey_codex_npm_bin_path }} --version 2>/dev/null | awk '{print $2}' || true)"
+    changed=0
+    current_version="$({{ mickey_codex_npm_bin_path }} --version 2>/dev/null | awk 'NR==1 {print $2}' || true)"
     if [ "$current_version" != "{{ mickey_codex_version }}" ]; then
       su - {{ mickey_guest_admin_user }} -c 'PATH=/usr/local/bin:/usr/bin:/bin npm install --no-audit --no-fund --prefix {{ mickey_guest_admin_home }}/.local {{ mickey_codex_package }}@{{ mickey_codex_version }}'
+      changed=1
     fi
-    ln -sfn {{ mickey_codex_npm_bin_path }} {{ mickey_codex_real_bin_path }}
+    if [ "$(readlink {{ mickey_codex_real_bin_path | quote }} 2>/dev/null || true)" != "{{ mickey_codex_npm_bin_path }}" ]; then
+      ln -sfn {{ mickey_codex_npm_bin_path }} {{ mickey_codex_real_bin_path }}
+      changed=1
+    fi
+    if [ "$changed" -eq 1 ]; then
+      echo changed
+    fi
+  register: mickey_codex_cli_result
+  changed_when: "'changed' in mickey_codex_cli_result.stdout"
   when: mickey_codex_enable | default(false) | bool
 
 - name: Install the Codex auth sync helper
-  ansible.builtin.template:
-    src: "{{ playbook_dir }}/../templates/mickey-codex-sync-auth.sh.j2"
-    dest: "{{ mickey_codex_sync_script_path }}"
-    owner: root
-    group: root
-    mode: "0755"
+  ansible.builtin.raw: |
+    set -eu
+    tmp="$(mktemp)"
+    cat > "$tmp" <<'EOF'
+    {{ lookup('ansible.builtin.template', playbook_dir ~ '/../templates/mickey-codex-sync-auth.sh.j2') }}
+    EOF
+
+    if [ -f {{ mickey_codex_sync_script_path | quote }} ] && cmp -s "$tmp" {{ mickey_codex_sync_script_path | quote }}; then
+      rm -f "$tmp"
+      exit 0
+    fi
+
+    install -D -m 0755 -o root -g root "$tmp" {{ mickey_codex_sync_script_path | quote }}
+    rm -f "$tmp"
+    echo changed
+  register: mickey_codex_sync_helper_result
+  changed_when: "'changed' in mickey_codex_sync_helper_result.stdout"
   when:
     - mickey_codex_enable | default(false) | bool
     - mickey_codex_shared_auth_enable | default(false) | bool
 
 - name: Remove the Codex auth sync helper when shared auth is disabled
-  ansible.builtin.file:
-    path: "{{ mickey_codex_sync_script_path }}"
-    state: absent
+  ansible.builtin.raw: |
+    if [ -e {{ mickey_codex_sync_script_path | quote }} ]; then
+      rm -f {{ mickey_codex_sync_script_path | quote }}
+      echo changed
+    fi
+  register: mickey_codex_sync_helper_absent_result
+  changed_when: "'changed' in mickey_codex_sync_helper_absent_result.stdout"
   when:
     - mickey_codex_enable | default(false) | bool
     - not (mickey_codex_shared_auth_enable | default(false) | bool)
 
 - name: Install the Codex launcher wrapper
-  ansible.builtin.template:
-    src: "{{ playbook_dir }}/../templates/codex-wrapper.sh.j2"
-    dest: "{{ mickey_codex_wrapper_path }}"
-    owner: "{{ mickey_guest_admin_user }}"
-    group: "{{ mickey_guest_admin_user }}"
-    mode: "0755"
+  ansible.builtin.raw: |
+    set -eu
+    tmp="$(mktemp)"
+    cat > "$tmp" <<'EOF'
+    {{ lookup('ansible.builtin.template', playbook_dir ~ '/../templates/codex-wrapper.sh.j2') }}
+    EOF
+
+    if [ -f {{ mickey_codex_wrapper_path | quote }} ] && cmp -s "$tmp" {{ mickey_codex_wrapper_path | quote }}; then
+      rm -f "$tmp"
+      exit 0
+    fi
+
+    install -D -m 0755 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} "$tmp" {{ mickey_codex_wrapper_path | quote }}
+    rm -f "$tmp"
+    echo changed
+  register: mickey_codex_wrapper_result
+  changed_when: "'changed' in mickey_codex_wrapper_result.stdout"
   when: mickey_codex_enable | default(false) | bool
 
 - name: Export CODEX_HOME for login shells
-  ansible.builtin.copy:
-    dest: "{{ mickey_codex_profile_script_path }}"
-    owner: root
-    group: root
-    mode: "0644"
-    content: |
-      export CODEX_HOME="${CODEX_HOME:-{{ mickey_codex_local_home }}}"
+  ansible.builtin.raw: |
+    set -eu
+    tmp="$(mktemp)"
+    cat > "$tmp" <<'EOF'
+    export CODEX_HOME="${CODEX_HOME:-{{ mickey_codex_local_home }}}"
+    EOF
+
+    if [ -f {{ mickey_codex_profile_script_path | quote }} ] && cmp -s "$tmp" {{ mickey_codex_profile_script_path | quote }}; then
+      rm -f "$tmp"
+      exit 0
+    fi
+
+    install -D -m 0644 -o root -g root "$tmp" {{ mickey_codex_profile_script_path | quote }}
+    rm -f "$tmp"
+    echo changed
+  register: mickey_codex_profile_script_result
+  changed_when: "'changed' in mickey_codex_profile_script_result.stdout"
   when: mickey_codex_enable | default(false) | bool
 
 - name: Publish the Codex wrapper on the global PATH
   ansible.builtin.raw: |
-    ln -sfn {{ mickey_codex_wrapper_path }} /usr/local/bin/codex
+    if [ "$(readlink /usr/local/bin/codex 2>/dev/null || true)" != "{{ mickey_codex_wrapper_path }}" ]; then
+      ln -sfn {{ mickey_codex_wrapper_path }} /usr/local/bin/codex
+      echo changed
+    fi
+  register: mickey_codex_path_result
+  changed_when: "'changed' in mickey_codex_path_result.stdout"
   when: mickey_codex_enable | default(false) | bool

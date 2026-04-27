@@ -1,0 +1,180 @@
+---
+- name: Detect the target architecture for pinned dotfile binaries
+  ansible.builtin.raw: uname -m
+  register: mickey_dotfiles_architecture_result
+  changed_when: false
+  when:
+    - mickey_dotfiles_enable | default(false) | bool
+    - mickey_dotfiles_architecture is not defined
+    - ansible_facts['architecture'] is not defined
+
+- name: Define dotfile source locations on the Ansible controller
+  ansible.builtin.set_fact:
+    mickey_dotfiles_repo_dir: "{{ mickey_dotfiles_source_dir | default(playbook_dir ~ '/../../../mickey-dotfiles') }}"
+    mickey_dotfiles_vendored_dir: "{{ playbook_dir }}/../files/dotfiles"
+  changed_when: false
+  when: mickey_dotfiles_enable | default(false) | bool
+
+- name: Resolve the target architecture for pinned dotfile binaries
+  ansible.builtin.set_fact:
+    mickey_dotfiles_architecture_effective: >-
+      {{
+        mickey_dotfiles_architecture
+        | default(ansible_facts['architecture'])
+        | default(mickey_dotfiles_architecture_result.stdout | trim)
+      }}
+  changed_when: false
+  when: mickey_dotfiles_enable | default(false) | bool
+
+- name: Resolve the pinned tmux build metadata
+  ansible.builtin.set_fact:
+    mickey_dotfiles_tmux_release_arch: "{{ mickey_dotfiles_tmux_release_arch_map[mickey_dotfiles_architecture_effective] | default('') }}"
+    mickey_dotfiles_tmux_asset_name: "tmux-{{ mickey_dotfiles_tmux_version }}-{{ mickey_dotfiles_tmux_release_arch_map[mickey_dotfiles_architecture_effective] | default('') }}.tar.gz"
+    mickey_dotfiles_tmux_archive_url: "https://github.com/tmux/tmux-builds/releases/download/v{{ mickey_dotfiles_tmux_version }}/tmux-{{ mickey_dotfiles_tmux_version }}-{{ mickey_dotfiles_tmux_release_arch_map[mickey_dotfiles_architecture_effective] | default('') }}.tar.gz"
+    mickey_dotfiles_tmux_archive_checksum: "{{ mickey_dotfiles_tmux_archive_checksum_map[mickey_dotfiles_tmux_release_arch_map[mickey_dotfiles_architecture_effective] | default('')] | default('') }}"
+  changed_when: false
+  when: mickey_dotfiles_enable | default(false) | bool
+
+- name: Fail when no pinned tmux build is defined for the target architecture
+  ansible.builtin.assert:
+    that:
+      - (mickey_dotfiles_tmux_release_arch | string | length) > 0
+      - (mickey_dotfiles_tmux_archive_checksum | string | length) > 0
+    fail_msg: "No pinned tmux build is configured for architecture={{ mickey_dotfiles_architecture_effective }}."
+  when: mickey_dotfiles_enable | default(false) | bool
+
+- name: Ensure the admin dotfile packages are installed
+  ansible.builtin.raw: |
+    set -eu
+    missing_packages=""
+    for pkg in {{ mickey_dotfiles_packages | join(' ') }}; do
+      if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+        missing_packages="$missing_packages $pkg"
+      fi
+    done
+
+    if [ -n "$missing_packages" ]; then
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update
+      apt-get install -y $missing_packages
+      echo changed
+    fi
+  register: mickey_dotfiles_package_result
+  changed_when: "'changed' in mickey_dotfiles_package_result.stdout"
+  when: mickey_dotfiles_enable | default(false) | bool
+
+- name: Ensure the admin dotfile directories exist
+  ansible.builtin.raw: |
+    install -d -m 0755 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} {{ mickey_guest_admin_home | quote }}
+    install -d -m 0755 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} {{ (mickey_guest_admin_home ~ '/.config') | quote }}
+  changed_when: false
+  when: mickey_dotfiles_enable | default(false) | bool
+
+- name: Install the pinned Starship binary
+  ansible.builtin.raw: |
+    set -eu
+    current_version="$({{ mickey_dotfiles_starship_bin_path }} --version 2>/dev/null | awk 'NR==1 {print $2}' || true)"
+    if [ "$current_version" = "{{ mickey_dotfiles_starship_version }}" ]; then
+      exit 0
+    fi
+
+    archive="/tmp/starship-{{ mickey_dotfiles_starship_version }}.tar.gz"
+    rm -f "$archive" /tmp/starship
+    curl -fsSL {{ mickey_dotfiles_starship_archive_url | quote }} -o "$archive"
+    tar -xzf "$archive" -C /tmp starship
+    install -o root -g root -m 0755 /tmp/starship {{ mickey_dotfiles_starship_bin_path | quote }}
+    rm -f "$archive" /tmp/starship
+    echo changed
+  register: mickey_dotfiles_starship_result
+  changed_when: "'changed' in mickey_dotfiles_starship_result.stdout"
+  when: mickey_dotfiles_enable | default(false) | bool
+
+- name: Install the pinned tmux binary
+  ansible.builtin.raw: |
+    set -eu
+    current_version="$({{ mickey_dotfiles_tmux_bin_path }} -V 2>/dev/null | awk '{print $2}' || true)"
+    if [ "$current_version" = "{{ mickey_dotfiles_tmux_version }}" ]; then
+      exit 0
+    fi
+
+    archive="/tmp/{{ mickey_dotfiles_tmux_asset_name }}"
+    tmpdir="$(mktemp -d)"
+    rm -f "$archive"
+    trap 'rm -rf "$tmpdir" "$archive"' EXIT
+
+    curl -fsSL {{ mickey_dotfiles_tmux_archive_url | quote }} -o "$archive"
+    printf '%s  %s\n' "{{ mickey_dotfiles_tmux_archive_checksum | regex_replace('^sha256:', '') }}" "$archive" | sha256sum -c -
+    tar -xzf "$archive" -C "$tmpdir"
+
+    tmux_bin="$(find "$tmpdir" -type f -name tmux | head -n 1)"
+    if [ -z "$tmux_bin" ]; then
+      echo "tmux binary not found in $archive" >&2
+      exit 1
+    fi
+
+    install -o root -g root -m 0755 "$tmux_bin" {{ mickey_dotfiles_tmux_bin_path | quote }}
+    echo changed
+  register: mickey_dotfiles_tmux_result
+  changed_when: "'changed' in mickey_dotfiles_tmux_result.stdout"
+  when: mickey_dotfiles_enable | default(false) | bool
+
+- name: Install the curated admin dotfiles
+  ansible.builtin.raw: |
+    set -eu
+    tmp="$(mktemp)"
+    cat > "$tmp" <<'EOF'
+    {{ lookup('ansible.builtin.file', lookup('ansible.builtin.first_found', {'files': item.sources})) }}
+    EOF
+
+    if [ -f {{ item.dest | quote }} ] && cmp -s "$tmp" {{ item.dest | quote }}; then
+      rm -f "$tmp"
+      exit 0
+    fi
+
+    install -D -m {{ item.mode | quote }} -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} "$tmp" {{ item.dest | quote }}
+    rm -f "$tmp"
+    echo changed
+  loop:
+    - sources:
+        - "{{ mickey_dotfiles_vendored_dir }}/.zprofile"
+      dest: "{{ mickey_guest_admin_home }}/.zprofile"
+      mode: "0644"
+    - sources:
+        - "{{ mickey_dotfiles_repo_dir }}/dot_zshrc.tmpl"
+        - "{{ mickey_dotfiles_vendored_dir }}/.zshrc"
+      dest: "{{ mickey_guest_admin_home }}/.zshrc"
+      mode: "0644"
+    - sources:
+        - "{{ mickey_dotfiles_repo_dir }}/dot_tmux.conf.tmpl"
+        - "{{ mickey_dotfiles_vendored_dir }}/.tmux.conf"
+      dest: "{{ mickey_guest_admin_home }}/.tmux.conf"
+      mode: "0644"
+    - sources:
+        - "{{ mickey_dotfiles_repo_dir }}/dot_gitconfig"
+        - "{{ mickey_dotfiles_vendored_dir }}/.gitconfig"
+      dest: "{{ mickey_guest_admin_home }}/.gitconfig"
+      mode: "0644"
+    - sources:
+        - "{{ mickey_dotfiles_repo_dir }}/dot_config/starship.toml"
+        - "{{ mickey_dotfiles_vendored_dir }}/starship.toml"
+      dest: "{{ mickey_guest_admin_home }}/.config/starship.toml"
+      mode: "0644"
+  register: mickey_dotfiles_file_results
+  changed_when: "'changed' in mickey_dotfiles_file_results.stdout"
+  when: mickey_dotfiles_enable | default(false) | bool
+
+- name: Ensure zsh is the admin user's login shell
+  ansible.builtin.raw: |
+    set -eu
+    current_shell="$(getent passwd {{ mickey_guest_admin_user | quote }} | awk -F: '{print $7}')"
+    if [ "$current_shell" = "{{ mickey_dotfiles_default_shell }}" ]; then
+      exit 0
+    fi
+
+    usermod --shell {{ mickey_dotfiles_default_shell | quote }} {{ mickey_guest_admin_user | quote }}
+    echo changed
+  register: mickey_dotfiles_shell_result
+  changed_when: "'changed' in mickey_dotfiles_shell_result.stdout"
+  when:
+    - mickey_dotfiles_enable | default(false) | bool
+    - mickey_dotfiles_set_default_shell | default(false) | bool

@@ -1,0 +1,22 @@
+---
+- name: Bootstrap the Mickey thud build VM
+  hosts: mickey-thud
+  become: true
+  gather_facts: false
+
+  vars:
+    mickey_build_share_mount_username: "{{ (samba.username | default(mickey_guest_admin_user)) if (samba is defined) else mickey_guest_admin_user }}"
+    mickey_codex_node_version: "16.20.2"
+
+  handlers:
+    - name: Validate Consul client config
+      ansible.builtin.raw: |
+        consul validate {{ mickey_consul_config_dir_effective | quote }}
+
+    - name: Restart Consul client
+      ansible.builtin.raw: |
+        systemctl restart consul
+
+  tasks:
+    - name: Run the shared build VM bootstrap for mickey-thud
+      ansible.builtin.include_tasks: ../tasks/bootstrap-build-vm.yml

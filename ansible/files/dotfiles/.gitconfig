@@ -1,0 +1,25 @@
+[user]
+	name = Maurice Tadros
+	email = mtadros@galvanic.com
+
+[init]
+	defaultBranch = main
+
+[pull]
+	rebase = false
+
+[push]
+	autoSetupRemote = true
+
+[branch]
+	autoSetupMerge = true
+
+[alias]
+	st = status -sb
+	co = checkout
+	sw = switch
+	br = branch
+	ci = commit
+	lg = log --graph --decorate --oneline --all
+	last = log -1 --stat
+	unstage = restore --staged --

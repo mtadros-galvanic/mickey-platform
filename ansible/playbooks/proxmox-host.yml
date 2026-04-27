@@ -7,6 +7,7 @@
   vars:
     mickey_bulk_partition_basename: "{{ mickey_bulk_partition_device | basename }}"
     mickey_proxmox_share_mount_username: "{{ (samba.username | default(mickey_guest_admin_user)) if (samba is defined) else mickey_guest_admin_user }}"
+    mickey_codex_node_version: "24.15.0"
 
   pre_tasks:
     - name: Load secrets if provided

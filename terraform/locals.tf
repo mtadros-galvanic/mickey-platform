@@ -7,6 +7,7 @@ locals {
       os_disk_datastore_id = var.fast_datastore_id
       started              = true
       on_boot              = true
+      memory_balloon_mb    = null
       tags                 = []
       extra_disks          = []
       usb_devices          = []

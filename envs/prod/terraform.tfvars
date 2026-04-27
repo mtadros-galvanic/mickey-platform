@@ -1,6 +1,7 @@
 # `make templates` creates the default Ubuntu 24.04 server template on Proxmox.
 # `make templates-bionic` creates the Ubuntu 18.04 template used by mickey-thud.
 # `make templates-jammy` creates the Ubuntu 22.04 template reserved for mickey-scarthgap.
+# `make templates-resolute` creates the Ubuntu 26.04 template used by mickey-at4.
 # The host baseline playbook must create the `bulk` datastore before Terraform
 # can attach guest disks there.
 
@@ -57,6 +58,7 @@ vms = {
     os_disk_gb           = 400
     os_disk_datastore_id = "bulk"
     lan_ipv4_cidr        = "10.25.1.105/24"
+    started              = false
     on_boot              = false
     tags                 = ["build", "yocto", "ubuntu-18"]
   }
@@ -68,11 +70,53 @@ vms = {
     vm_id                = 704
     cpu_cores            = 4
     memory_mb            = 16384
-    os_disk_gb           = 400
+    os_disk_gb           = 500
     os_disk_datastore_id = "bulk"
     lan_ipv4_cidr        = "10.25.1.210/24"
-    started              = false
+    started              = true
     on_boot              = false
     tags                 = ["build", "yocto", "ubuntu-22"]
+  }
+
+  "mickey-at4" = {
+    clone_template_name = "ubuntu-26-04-server-cloudinit"
+    role                = "utility"
+    vm_id               = 706
+    cpu_cores           = 2
+    memory_mb           = 8192
+    memory_balloon_mb   = 2048
+    os_disk_gb          = 50
+    lan_ipv4_cidr       = "10.25.1.211/24"
+    started             = true
+    on_boot             = true
+    tags                = ["ubuntu-26"]
+  }
+
+  "mickey-tmp" = {
+    clone_template_name = "ubuntu-26-04-server-cloudinit"
+    role                = "utility"
+    vm_id               = 707
+    cpu_cores           = 4
+    memory_mb           = 8192
+    memory_balloon_mb   = 2048
+    os_disk_gb          = 50
+    lan_ipv4_cidr       = "10.25.1.212/24"
+    started             = true
+    on_boot             = true
+    tags                = ["ubuntu-26"]
+  }
+
+  "mickey-controller" = {
+    clone_template_name = "ubuntu-26-04-server-cloudinit"
+    role                = "utility"
+    vm_id               = 708
+    cpu_cores           = 2
+    memory_mb           = 8192
+    memory_balloon_mb   = 2048
+    os_disk_gb          = 50
+    lan_ipv4_cidr       = "10.25.1.214/24"
+    started             = true
+    on_boot             = true
+    tags                = ["ubuntu-26"]
   }
 }

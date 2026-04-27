@@ -17,10 +17,10 @@ The secrets file is split into three namespaces:
   - Proxmox API endpoint and token
 - `guests`
   - SSH keys plus password hashes for the bootstrap login user
-  - `extra_vm_admin_password_hash` is passed to cloud-init for additional VMs such as `mickey-thud`
-  - role-specific hashes remain available for the control and desktop Ansible playbooks
+  - `admin_password_hash` is the preferred shared password hash for current guest bootstrap
+  - the helper scripts and playbooks still accept older role-specific hashes as a fallback during the topology transition
 - `samba`
-  - Samba username and password for the desktop VM share
+  - Samba username and password for the `mickey-infra` share
 
 ## Workflow
 
