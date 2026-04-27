@@ -26,6 +26,13 @@ This directory owns the post-install host baseline and guest bootstrap for `mick
   - install `cifs-utils`, a pinned user-local Node 24 toolchain, the Codex CLI, and the guest-agent baseline
   - persist the `mickey-share` SMB credential file and automount `/mnt/mickey-share`
   - point local Codex auth at the shared `mickey-share` copy when present
+- `playbooks/utility-vm.yml`
+  - bootstrap utility guests such as `mickey-at4`, `mickey-tmp`, and `mickey-controller`
+  - ensure the bootstrap user's password and `authorized_keys` are managed by Ansible
+  - install the guest-agent baseline and a CIFS automount for `/mnt/mickey-share`
+  - install a pinned user-local Node 24 toolchain and the Codex CLI
+  - point local Codex auth at the shared `mickey-share` copy when present
+  - sync the controller's `~/Projects/mickey` tree into `~/Projects/mickey` on the guest
 - `playbooks/build-thud-vm.yml`
   - bootstrap the legacy `mickey-thud` build guest
   - ensure the bootstrap user's password and `authorized_keys` are managed by Ansible

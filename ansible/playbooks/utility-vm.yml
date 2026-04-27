@@ -135,3 +135,7 @@
 
     - name: Install the curated admin dotfiles on the utility guest
       ansible.builtin.include_tasks: ../tasks/configure-admin-dotfiles.yml
+
+    - name: Sync the Mickey projects tree onto utility guests
+      ansible.builtin.include_tasks: ../tasks/sync-utility-projects.yml
+      when: mickey_utility_projects_sync_enable | default(false) | bool

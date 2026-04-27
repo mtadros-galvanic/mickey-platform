@@ -8,11 +8,15 @@ mickey_utility_apt_packages:
   - jq
   - qemu-guest-agent
   - ripgrep
+  - rsync
   - tree
   - unzip
   - xz-utils
   - zip
 
+mickey_utility_projects_sync_enable: true
+mickey_utility_projects_root: "/home/{{ mickey_guest_admin_user }}/Projects"
+mickey_utility_projects_dest_dir: "{{ mickey_utility_projects_root }}/mickey"
 mickey_utility_share_mount_path: "{{ mickey_shared_mount_path }}"
 mickey_utility_share_name: mickey-share
 mickey_utility_share_server: "{{ hostvars['mickey-infra'].ansible_host | default('10.25.1.206') }}"
