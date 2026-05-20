@@ -26,6 +26,7 @@ without central infra edits.
 - Ubuntu Server ERP VM `mickey-erp`: `10.25.1.208`
 - Legacy Ubuntu 18 build VM `mickey-thud`: `10.25.1.105`
 - Ubuntu Server 22 build VM `mickey-scarthgap`: `10.25.1.210`
+- Ubuntu Server 22 build VM `mickey-brimstone`: `10.25.1.215`
 - Legacy Windows 7 ISE VM `mickey-ise7`: `VMID 703` on `bulk`
 - NVMe: Proxmox OS plus fast VM storage
 - 4 TB HDD: Proxmox bulk datastore
@@ -45,12 +46,12 @@ terraform/  Proxmox provisioning and generated inventory output
 ```
 
 Optional host-only SSH keys can be tracked under `ansible/files/authorized_keys/<inventory_hostname>`. Those files are merged with the shared `guests.ssh_public_keys` list during guest bootstrap.
-Optional guest SSH client files can be placed under `ansible/files/ssh/<inventory_hostname>/`. During `make ansible-build-thud` or `make ansible-build-scarthgap`, `config` and private keys from that directory are copied into the guest user's `~/.ssh/` directory, while `.pub` files are ignored.
-Managed Linux hosts receive a pinned user-local Node toolchain for Codex. `mickey-thud` stays on `Node 16.20.2`, while `mickey-infra`, `mickey-erp`, `mickey-scarthgap`, and `mickey-pve` use `Node 24.15.0`. The shared `mickey-share` path is `/mnt/mickey-share` on every Linux guest, with `mickey-infra` exposing that path as a bind-mounted alias of its local `/srv/share` filesystem. When `/mnt/mickey-share/admin/codex/galvanic/auth.json` exists, the guest bootstrap points local Codex auth at that shared file. The Proxmox host baseline also prepares `/mnt/mickey-share` as a CIFS automount to `mickey-infra`, while still keeping Samba itself off the hypervisor.
+Optional guest SSH client files can be placed under `ansible/files/ssh/<inventory_hostname>/`. During `make ansible-build-thud`, `make ansible-build-scarthgap`, or `make ansible-build-brimstone`, `config` and private keys from that directory are copied into the guest user's `~/.ssh/` directory, while `.pub` files are ignored.
+Managed Linux hosts receive a pinned user-local Node toolchain for Codex. `mickey-thud` stays on `Node 16.20.2`, while `mickey-infra`, `mickey-erp`, `mickey-scarthgap`, `mickey-brimstone`, and `mickey-pve` use `Node 24.15.0`. The shared `mickey-share` path is `/mnt/mickey-share` on every Linux guest, with `mickey-infra` exposing that path as a bind-mounted alias of its local `/srv/share` filesystem. When `/mnt/mickey-share/admin/codex/galvanic/auth.json` exists, the guest bootstrap points local Codex auth at that shared file. The Proxmox host baseline also prepares `/mnt/mickey-share` as a CIFS automount to `mickey-infra`, while still keeping Samba itself off the hypervisor.
 The generated inventory now also exposes `consul_client_vms`, which is the set
 of guests that should run a local Consul agent and accept project-owned service
 definitions under `/etc/consul.d/`.
-For `mickey-thud` and `mickey-scarthgap`, the build bootstrap additionally syncs the required GitHub build repos under `~/Projects`, installs manual `mickey-share-mount` and `mickey-share-umount` helpers for the `mickey-infra` Samba share, and installs a `mickey-yocto-fetch-diagnose` helper for source-specific fetch testing.
+For `mickey-thud`, `mickey-scarthgap`, and `mickey-brimstone`, the build bootstrap additionally syncs the required GitHub build repos under `~/Projects`, installs manual `mickey-share-mount` and `mickey-share-umount` helpers for the `mickey-infra` Samba share, and installs a `mickey-yocto-fetch-diagnose` helper for source-specific fetch testing.
 
 ## Operator Flow
 
@@ -68,10 +69,11 @@ For `mickey-thud` and `mickey-scarthgap`, the build bootstrap additionally syncs
 12. Run `make ansible-erp` for `mickey-erp`. This now includes the local Consul client baseline.
 13. Run `make ansible-build-thud` for `mickey-thud` when you need the legacy Ubuntu 18 build guest. This keeps its Codex Node runtime on `16.20.2` and includes the local Consul client baseline.
 14. Run `make ansible-build-scarthgap` for `mickey-scarthgap` when you want the modern build guest. This keeps its Codex Node runtime on `24.15.0` and includes the local Consul client baseline.
-15. Seed `/mnt/mickey-share/admin/codex/galvanic/auth.json` once from an already-authenticated machine if you want shared Codex login across the Linux guests.
-16. On `mickey-thud`, use `sudo mickey-share-mount` and `sudo mickey-share-umount` when you need temporary access to `mickey-infra`'s `/srv/share`.
-17. On `mickey-thud`, use `mickey-yocto-fetch-diagnose` to compare slow Yocto fetches against a known-fast control download before changing BitBake mirror settings.
-18. Run `make ise7-import` if you want the legacy Windows 7 Xilinx VM imported from the local VMware source tree. This path is manual by design: it converts the active VMware branch into a local qcow2, uploads that image through the Proxmox API, and imports it onto `bulk`.
+15. Run `make ansible-build-brimstone` for `mickey-brimstone` when you want the brimstone build guest with only `brimestone` and `Protech` under `~/Projects`.
+16. Seed `/mnt/mickey-share/admin/codex/galvanic/auth.json` once from an already-authenticated machine if you want shared Codex login across the Linux guests.
+17. On `mickey-thud`, use `sudo mickey-share-mount` and `sudo mickey-share-umount` when you need temporary access to `mickey-infra`'s `/srv/share`.
+18. On `mickey-thud`, use `mickey-yocto-fetch-diagnose` to compare slow Yocto fetches against a known-fast control download before changing BitBake mirror settings.
+19. Run `make ise7-import` if you want the legacy Windows 7 Xilinx VM imported from the local VMware source tree. This path is manual by design: it converts the active VMware branch into a local qcow2, uploads that image through the Proxmox API, and imports it onto `bulk`.
 
 The current template flow is server-only. `mickey-infra` now uses the same Ubuntu 24.04 server cloud image as future server guests, which keeps template creation fast and repeatable.
 
@@ -90,6 +92,7 @@ The host baseline is intentionally guarded. It verifies that `/dev/sda` matches 
 - `make ansible-erp`
 - `make ansible-build-thud`
 - `make ansible-build-scarthgap`
+- `make ansible-build-brimstone`
 - `make ise7-import`
 
 See [docs/architecture.md](/home/mtadros/Projects/POC/mickey-platform/docs/architecture.md) for the design intent and operational boundaries.

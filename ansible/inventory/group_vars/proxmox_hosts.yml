@@ -26,6 +26,10 @@ mickey_proxmox_share_name: mickey-share
 mickey_proxmox_share_server: 10.25.1.206
 mickey_proxmox_share_credentials_path: /etc/mickey-platform/mickey-infra-share.credentials
 mickey_proxmox_share_fstab_options: "credentials={{ mickey_proxmox_share_credentials_path }},uid=0,gid=0,vers=3.0,file_mode=0660,dir_mode=0770,mfsymlinks,_netdev,nofail,x-systemd.automount"
+mickey_proxmox_fast_share_mount_path: "{{ mickey_fast_shared_mount_path }}"
+mickey_proxmox_fast_share_name: mickey-shared-fast
+mickey_proxmox_fast_share_server: "{{ mickey_proxmox_share_server }}"
+mickey_proxmox_fast_share_fstab_options: "{{ mickey_proxmox_share_fstab_options }}"
 mickey_proxmox_share_probe_timeout_seconds: 2
 mickey_proxmox_disabled_repo_files:
   - /etc/apt/sources.list.d/pve-enterprise.sources

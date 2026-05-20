@@ -1,7 +1,11 @@
 #!/bin/sh
 set -u
 
-export CODEX_HOME="${CODEX_HOME:-{{ mickey_codex_local_home }}}"
+case "${CODEX_HOME:-}" in
+  ""|{{ mickey_codex_hosts_root }}/*|{{ mickey_codex_legacy_shared_root }}/hosts/*)
+    export CODEX_HOME={{ mickey_codex_local_home | quote }}
+    ;;
+esac
 
 sync_cmd={{ mickey_codex_sync_script_path | quote }}
 real_codex={{ mickey_codex_real_bin_path | quote }}

@@ -67,6 +67,7 @@
   ansible.builtin.raw: |
     install -d -m 0755 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} {{ mickey_guest_admin_home | quote }}
     install -d -m 0755 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} {{ (mickey_guest_admin_home ~ '/.config') | quote }}
+    install -d -m 0755 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} {{ mickey_dotfiles_tmux_plugin_root | quote }}
   changed_when: false
   when: mickey_dotfiles_enable | default(false) | bool
 
@@ -161,6 +162,33 @@
       mode: "0644"
   register: mickey_dotfiles_file_results
   changed_when: "'changed' in mickey_dotfiles_file_results.stdout"
+  when: mickey_dotfiles_enable | default(false) | bool
+
+- name: Install tmux plugins declared by the curated config
+  ansible.builtin.raw: |
+    set -eu
+    plugin_dir={{ (mickey_dotfiles_tmux_plugin_root ~ '/' ~ item.name) | quote }}
+    repo={{ item.repo | quote }}
+
+    if [ -d "$plugin_dir/.git" ]; then
+      current_url="$(git -C "$plugin_dir" config --get remote.origin.url || true)"
+      if [ "$current_url" != "$repo" ]; then
+        git -C "$plugin_dir" remote set-url origin "$repo"
+        echo changed
+      fi
+      exit 0
+    fi
+
+    if [ -e "$plugin_dir" ]; then
+      echo "refusing to replace non-git tmux plugin path: $plugin_dir" >&2
+      exit 1
+    fi
+
+    su - {{ mickey_guest_admin_user | quote }} -c "git clone '$repo' '$plugin_dir'"
+    echo changed
+  loop: "{{ mickey_dotfiles_tmux_plugins }}"
+  register: mickey_dotfiles_tmux_plugin_results
+  changed_when: "'changed' in mickey_dotfiles_tmux_plugin_results.stdout"
   when: mickey_dotfiles_enable | default(false) | bool
 
 - name: Ensure zsh is the admin user's login shell

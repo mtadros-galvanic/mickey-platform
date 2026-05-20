@@ -57,9 +57,12 @@ This directory owns the post-install host baseline and guest bootstrap for `mick
   - keep `mickey-share-mount` and `mickey-share-umount` as convenience wrappers
   - install a `mickey-yocto-fetch-diagnose` helper for source-specific fetch testing
   - install and enable the guest agent and SSH server baseline
+- `playbooks/build-brimstone-vm.yml`
+  - bootstrap the `mickey-brimstone` build guest with the same Ubuntu 22.04 baseline as `mickey-scarthgap`
+  - clone and update only `brimestone` and `Protech` under `~/Projects`
 - `playbooks/site.yml`
   - imports the normal Proxmox, infra, and ERP baselines
-  - does not run the build guest playbooks automatically because `mickey-thud` and `mickey-scarthgap` are operated explicitly
+  - does not run the build guest playbooks automatically because `mickey-thud`, `mickey-scarthgap`, and `mickey-brimstone` are operated explicitly
 
 ## Inventory
 

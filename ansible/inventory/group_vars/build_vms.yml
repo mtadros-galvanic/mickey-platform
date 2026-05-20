@@ -15,6 +15,10 @@ mickey_build_share_name: mickey-share
 mickey_build_share_server: "{{ hostvars['mickey-infra'].ansible_host | default('10.25.1.206') }}"
 mickey_build_share_credentials_path: /etc/mickey-platform/mickey-infra-share.credentials
 mickey_build_share_fstab_options: "credentials={{ mickey_build_share_credentials_path }},uid={{ mickey_guest_admin_user }},gid={{ mickey_guest_admin_user }},vers=3.0,file_mode=0660,dir_mode=0770,mfsymlinks,_netdev,nofail,x-systemd.automount"
+mickey_build_fast_share_mount_path: "{{ mickey_fast_shared_mount_path }}"
+mickey_build_fast_share_name: mickey-shared-fast
+mickey_build_fast_share_server: "{{ hostvars['mickey-infra'].ansible_host | default('10.25.1.206') }}"
+mickey_build_fast_share_fstab_options: "{{ mickey_build_share_fstab_options }}"
 mickey_build_share_mount_command: /usr/local/bin/mickey-share-mount
 mickey_build_share_umount_command: /usr/local/bin/mickey-share-umount
 mickey_build_yocto_diagnose_command: /usr/local/bin/mickey-yocto-fetch-diagnose

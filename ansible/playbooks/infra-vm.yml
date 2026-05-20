@@ -264,6 +264,137 @@
         executable: /bin/bash
       changed_when: false
 
+    - name: Inspect the current fast share mount source
+      ansible.builtin.command: "findmnt -n -o SOURCE --target {{ mickey_fast_share_mount_path }}"
+      register: mickey_fast_share_mount_source
+      changed_when: false
+      failed_when: false
+
+    - name: Detect the parent disk for the mounted fast share volume
+      ansible.builtin.command: "lsblk -no pkname {{ mickey_fast_share_mount_source.stdout | trim }}"
+      register: mickey_fast_share_parent_disk
+      changed_when: false
+      when: mickey_fast_share_mount_source.stdout | trim != ""
+
+    - name: Reuse the currently mounted fast share disk when present
+      ansible.builtin.set_fact:
+        mickey_infra_fast_partition_device: "{{ mickey_fast_share_mount_source.stdout | trim }}"
+        mickey_infra_fast_disk_device: "/dev/{{ mickey_fast_share_parent_disk.stdout | trim }}"
+      when: mickey_fast_share_mount_source.stdout | trim != ""
+
+    - name: Detect non-root block disk candidates for the fast share
+      ansible.builtin.shell: |
+        root_disk={{ mickey_root_parent_disk.stdout | trim | quote }}
+        bulk_disk="$(basename {{ mickey_infra_data_disk_device | quote }})"
+        lsblk -dn -o NAME,TYPE,FSTYPE,LABEL \
+          | awk '$2 == "disk" && $3 != "iso9660" && $4 != "cidata" { print $1 }' \
+          | grep -vx "$root_disk" \
+          | grep -vx "$bulk_disk"
+      args:
+        executable: /bin/bash
+      register: mickey_fast_disk_candidates
+      changed_when: false
+      failed_when: false
+      when: mickey_fast_share_mount_source.stdout | trim == ""
+
+    - name: Fail when the infra fast share disk cannot be identified uniquely
+      ansible.builtin.fail:
+        msg: "Expected exactly one non-root, non-bulk disk for the fast share volume, found: {{ mickey_fast_disk_candidates.stdout_lines | default([]) }}"
+      when:
+        - mickey_fast_share_mount_source.stdout | trim == ""
+        - (mickey_fast_disk_candidates.stdout_lines | default([]) | length) != 1
+
+    - name: Set the infra fast share disk path
+      ansible.builtin.set_fact:
+        mickey_infra_fast_disk_device: "/dev/{{ mickey_fast_disk_candidates.stdout_lines[0] }}"
+        mickey_infra_fast_partition_device: "/dev/{{ mickey_fast_disk_candidates.stdout_lines[0] }}1"
+      when: mickey_fast_share_mount_source.stdout | trim == ""
+
+    - name: Inspect the infra fast share disk partition table
+      ansible.builtin.command: "parted -s {{ mickey_infra_fast_disk_device }} print"
+      register: mickey_infra_fast_parted_print
+      changed_when: false
+      failed_when: false
+
+    - name: Create a GPT label on the infra fast share disk
+      ansible.builtin.command: "parted -s {{ mickey_infra_fast_disk_device }} mklabel gpt"
+      when: "'Partition Table: gpt' not in mickey_infra_fast_parted_print.stdout"
+
+    - name: Create the infra fast share partition when missing
+      ansible.builtin.shell: |
+        if lsblk {{ mickey_infra_fast_partition_device }} >/dev/null 2>&1; then
+          echo present
+        else
+          parted -s {{ mickey_infra_fast_disk_device }} mkpart primary ext4 1MiB 100%
+          echo created
+        fi
+      args:
+        executable: /bin/bash
+      register: mickey_infra_fast_partition_create
+      changed_when: "'created' in mickey_infra_fast_partition_create.stdout"
+
+    - name: Detect the filesystem on the infra fast share partition
+      ansible.builtin.command: "blkid -o value -s TYPE {{ mickey_infra_fast_partition_device }}"
+      register: mickey_infra_fast_fs_type
+      changed_when: false
+      failed_when: false
+
+    - name: Create the ext4 filesystem on the infra fast share partition
+      ansible.builtin.command: "mkfs.ext4 -F -L {{ mickey_fast_share_label }} {{ mickey_infra_fast_partition_device }}"
+      when: mickey_infra_fast_fs_type.stdout | trim != "ext4"
+
+    - name: Ensure the fast share mount path exists
+      ansible.builtin.file:
+        path: "{{ mickey_fast_share_mount_path }}"
+        state: directory
+        mode: "0770"
+
+    - name: Read the infra fast share partition UUID
+      ansible.builtin.command: "blkid -o value -s UUID {{ mickey_infra_fast_partition_device }}"
+      register: mickey_infra_fast_uuid
+      changed_when: false
+
+    - name: Persist the fast share mount in fstab
+      ansible.builtin.lineinfile:
+        path: /etc/fstab
+        regexp: "^UUID=.*\\s+{{ mickey_fast_share_mount_path | regex_escape() }}\\s"
+        line: "UUID={{ mickey_infra_fast_uuid.stdout | trim }} {{ mickey_fast_share_mount_path }} ext4 defaults,noatime 0 2"
+
+    - name: Mount the infra fast share filesystem
+      ansible.builtin.shell: |
+        if mountpoint -q {{ mickey_fast_share_mount_path }}; then
+          echo mounted
+        else
+          mount {{ mickey_fast_share_mount_path }}
+          echo changed
+        fi
+      args:
+        executable: /bin/bash
+      register: mickey_infra_fast_mount_result
+      changed_when: "'changed' in mickey_infra_fast_mount_result.stdout"
+
+    - name: Ensure the fast shared alias mount path exists on the infra guest
+      ansible.builtin.file:
+        path: "{{ mickey_fast_share_alias_mount_path }}"
+        state: directory
+        mode: "0755"
+
+    - name: Persist the fast shared alias bind mount in fstab
+      ansible.builtin.lineinfile:
+        path: /etc/fstab
+        regexp: "^{{ mickey_fast_share_mount_path | regex_escape() }}\\s+{{ mickey_fast_share_alias_mount_path | regex_escape() }}\\s+none\\s"
+        line: "{{ mickey_fast_share_mount_path }} {{ mickey_fast_share_alias_mount_path }} none defaults,bind 0 0"
+
+    - name: Mount the fast shared alias path on the infra guest
+      ansible.builtin.shell: |
+        if mountpoint -q {{ mickey_fast_share_alias_mount_path | quote }}; then
+          exit 0
+        fi
+        mount {{ mickey_fast_share_alias_mount_path | quote }}
+      args:
+        executable: /bin/bash
+      changed_when: false
+
     - name: Ensure the Samba user exists as a local account
       ansible.builtin.user:
         name: "{{ mickey_samba_username }}"
@@ -277,6 +408,49 @@
         owner: "{{ mickey_samba_username }}"
         group: sambashare
         mode: "0770"
+
+    - name: Ensure the fast share path has the expected ownership
+      ansible.builtin.file:
+        path: "{{ mickey_fast_share_mount_path }}"
+        state: directory
+        owner: "{{ mickey_samba_username }}"
+        group: sambashare
+        mode: "0770"
+
+    - name: Seed the fast Codex tree from the legacy bulk share when empty
+      ansible.builtin.shell: |
+        source={{ mickey_codex_legacy_shared_root | quote }}
+        dest={{ mickey_codex_shared_root | quote }}
+        parent="$(dirname "$dest")"
+        marker="$dest/.seeded-from-legacy"
+
+        if [ ! -d "$source" ]; then
+          exit 0
+        fi
+
+        install -d -m 0770 -o {{ mickey_samba_username | quote }} -g sambashare "$parent"
+        if [ -f "$marker" ]; then
+          exit 0
+        fi
+
+        rm -rf "$dest"
+        install -d -m 0770 -o {{ mickey_samba_username | quote }} -g sambashare "$dest"
+        tar \
+          --exclude='./hosts/*/.tmp' \
+          --exclude='./hosts/*/cache' \
+          --exclude='./hosts/*/log' \
+          --exclude='./hosts/*/sessions' \
+          --exclude='./hosts/*/shell_snapshots' \
+          --exclude='./hosts/*/tmp' \
+          --exclude='./hosts/*/plugins' \
+          -C "$source" -cf - . | tar -C "$dest" -xf -
+        touch "$marker"
+        chown -R {{ mickey_samba_username | quote }}:sambashare "$dest"
+        echo changed
+      args:
+        executable: /bin/bash
+      register: mickey_fast_codex_seed_result
+      changed_when: "'changed' in mickey_fast_codex_seed_result.stdout"
 
     - name: Ensure the Codex shared paths exist on the share
       ansible.builtin.file:

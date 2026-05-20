@@ -31,6 +31,39 @@
       mode: "0700"
   when: mickey_codex_enable | default(false) | bool
 
+- name: Enable user namespaces for the Codex Linux sandbox
+  ansible.builtin.raw: |
+    set -eu
+    tmp="$(mktemp)"
+    cat > "$tmp" <<'EOF'
+    # Managed by Mickey Ansible. Required for the Codex bubblewrap sandbox.
+    kernel.unprivileged_userns_clone = 1
+    user.max_user_namespaces = 95900
+    kernel.apparmor_restrict_unprivileged_userns = 0
+    EOF
+
+    changed=0
+    if [ ! -f {{ mickey_codex_sandbox_sysctl_path | quote }} ] || ! cmp -s "$tmp" {{ mickey_codex_sandbox_sysctl_path | quote }}; then
+      install -D -m 0644 -o root -g root "$tmp" {{ mickey_codex_sandbox_sysctl_path | quote }}
+      changed=1
+    fi
+    rm -f "$tmp"
+
+    sysctl -q -w kernel.unprivileged_userns_clone=1
+    sysctl -q -w user.max_user_namespaces=95900
+    if sysctl kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
+      sysctl -q -w kernel.apparmor_restrict_unprivileged_userns=0
+    fi
+
+    if [ "$changed" -eq 1 ]; then
+      echo changed
+    fi
+  register: mickey_codex_sandbox_sysctl_result
+  changed_when: "'changed' in mickey_codex_sandbox_sysctl_result.stdout"
+  when:
+    - mickey_codex_enable | default(false) | bool
+    - mickey_codex_sandbox_userns_enable | default(true) | bool
+
 - name: Persist the local Codex tmp bind mount in fstab
   ansible.builtin.raw: |
     set -eu
@@ -51,6 +84,76 @@
   changed_when: "'changed' in mickey_codex_tmp_fstab_result.stdout"
   when: mickey_codex_enable | default(false) | bool
 
+- name: Remove the legacy Codex tmp bind mount from fstab
+  ansible.builtin.raw: |
+    set -eu
+    legacy={{ mickey_codex_legacy_tmp_mount_path | quote }}
+    current={{ mickey_codex_tmp_mount_path | quote }}
+    tmp="$(mktemp)"
+    trap 'rm -f "$tmp"' EXIT
+
+    if [ "$legacy" = "$current" ]; then
+      exit 0
+    fi
+
+    if mountpoint -q "$legacy"; then
+      umount "$legacy" || umount -l "$legacy" || true
+      changed=1
+    else
+      changed=0
+    fi
+
+    grep -v " $legacy none bind " /etc/fstab > "$tmp" || true
+    if ! cmp -s "$tmp" /etc/fstab; then
+      cat "$tmp" > /etc/fstab
+      systemctl daemon-reload
+      changed=1
+    fi
+
+    if [ "$changed" -eq 1 ]; then
+      echo changed
+    fi
+  register: mickey_codex_legacy_tmp_fstab_result
+  changed_when: "'changed' in mickey_codex_legacy_tmp_fstab_result.stdout"
+  when:
+    - mickey_codex_enable | default(false) | bool
+    - mickey_codex_legacy_tmp_mount_path is defined
+
+- name: Remove the shared Codex tmp bind mount from fstab
+  ansible.builtin.raw: |
+    set -eu
+    stale={{ mickey_codex_shared_tmp_mount_path | quote }}
+    current={{ mickey_codex_tmp_mount_path | quote }}
+    tmp="$(mktemp)"
+    trap 'rm -f "$tmp"' EXIT
+
+    if [ "$stale" = "$current" ]; then
+      exit 0
+    fi
+
+    if mountpoint -q "$stale"; then
+      umount "$stale" || umount -l "$stale" || true
+      changed=1
+    else
+      changed=0
+    fi
+
+    grep -v " $stale none bind " /etc/fstab > "$tmp" || true
+    if ! cmp -s "$tmp" /etc/fstab; then
+      cat "$tmp" > /etc/fstab
+      systemctl daemon-reload
+      changed=1
+    fi
+
+    if [ "$changed" -eq 1 ]; then
+      echo changed
+    fi
+  register: mickey_codex_shared_tmp_fstab_result
+  changed_when: "'changed' in mickey_codex_shared_tmp_fstab_result.stdout"
+  when:
+    - mickey_codex_enable | default(false) | bool
+    - mickey_codex_shared_tmp_mount_path is defined
+
 - name: Mount the local Codex tmp bind mount
   ansible.builtin.raw: |
     set -eu
@@ -62,9 +165,9 @@
 
     if mountpoint -q "$target"; then
       current_source="$(findmnt -no SOURCE --target "$target" || true)"
-      if [ "$current_source" = "$source" ]; then
-        exit 0
-      fi
+      case "$current_source" in
+        "$source"|*"[$source]") exit 0 ;;
+      esac
       umount "$target"
     fi
 
@@ -113,11 +216,22 @@
   ansible.builtin.raw: |
     set -eu
     changed=0
+
+    package={{ mickey_codex_package | quote }}
+    requested_version={{ mickey_codex_version | default('') | quote }}
+    if [ -n "$requested_version" ]; then
+      package="$package@$requested_version"
+    fi
+
     current_version="$({{ mickey_codex_npm_bin_path }} --version 2>/dev/null | awk 'NR==1 {print $2}' || true)"
-    if [ "$current_version" != "{{ mickey_codex_version }}" ]; then
-      su - {{ mickey_guest_admin_user }} -c 'PATH=/usr/local/bin:/usr/bin:/bin npm install --no-audit --no-fund --prefix {{ mickey_guest_admin_home }}/.local {{ mickey_codex_package }}@{{ mickey_codex_version }}'
+    if [ -n "$requested_version" ] && [ "$current_version" != "$requested_version" ]; then
+      su - {{ mickey_guest_admin_user }} -c "PATH=/usr/local/bin:/usr/bin:/bin npm install --no-audit --no-fund -g $package"
+      changed=1
+    elif [ -z "$current_version" ]; then
+      su - {{ mickey_guest_admin_user }} -c "PATH=/usr/local/bin:/usr/bin:/bin npm install --no-audit --no-fund -g $package"
       changed=1
     fi
+
     if [ "$(readlink {{ mickey_codex_real_bin_path | quote }} 2>/dev/null || true)" != "{{ mickey_codex_npm_bin_path }}" ]; then
       ln -sfn {{ mickey_codex_npm_bin_path }} {{ mickey_codex_real_bin_path }}
       changed=1
@@ -129,12 +243,36 @@
   changed_when: "'changed' in mickey_codex_cli_result.stdout"
   when: mickey_codex_enable | default(false) | bool
 
+- name: Install the Codex update helper
+  ansible.builtin.raw: |
+    set -eu
+    tmp="$(mktemp)"
+    cat > "$tmp" <<'EOF'
+    #!/bin/sh
+    set -eu
+
+    npm install --no-audit --no-fund -g {{ mickey_codex_package | quote }}@latest
+    codex --version
+    EOF
+
+    if [ -f {{ mickey_codex_update_path | quote }} ] && cmp -s "$tmp" {{ mickey_codex_update_path | quote }}; then
+      rm -f "$tmp"
+      exit 0
+    fi
+
+    install -D -m 0755 -o root -g root "$tmp" {{ mickey_codex_update_path | quote }}
+    rm -f "$tmp"
+    echo changed
+  register: mickey_codex_update_helper_result
+  changed_when: "'changed' in mickey_codex_update_helper_result.stdout"
+  when: mickey_codex_enable | default(false) | bool
+
 - name: Install the Codex auth sync helper
   ansible.builtin.raw: |
     set -eu
     tmp="$(mktemp)"
     cat > "$tmp" <<'EOF'
-    {{ lookup('ansible.builtin.template', playbook_dir ~ '/../templates/mickey-codex-sync-auth.sh.j2') }}
+    {{ lookup('ansible.builtin.template', (mickey_ansible_root | default(playbook_dir ~ '/..')) ~ '/templates/mickey-codex-sync-auth.sh.j2') }}
     EOF
 
     if [ -f {{ mickey_codex_sync_script_path | quote }} ] && cmp -s "$tmp" {{ mickey_codex_sync_script_path | quote }}; then
@@ -168,7 +306,7 @@
     set -eu
     tmp="$(mktemp)"
     cat > "$tmp" <<'EOF'
-    {{ lookup('ansible.builtin.template', playbook_dir ~ '/../templates/codex-wrapper.sh.j2') }}
+    {{ lookup('ansible.builtin.template', (mickey_ansible_root | default(playbook_dir ~ '/..')) ~ '/templates/codex-wrapper.sh.j2') }}
     EOF
 
     if [ -f {{ mickey_codex_wrapper_path | quote }} ] && cmp -s "$tmp" {{ mickey_codex_wrapper_path | quote }}; then
@@ -188,7 +326,11 @@
     set -eu
     tmp="$(mktemp)"
     cat > "$tmp" <<'EOF'
-    export CODEX_HOME="${CODEX_HOME:-{{ mickey_codex_local_home }}}"
+    case "${CODEX_HOME:-}" in
+      ""|{{ mickey_codex_hosts_root }}/*|{{ mickey_codex_legacy_shared_root }}/hosts/*)
+        export CODEX_HOME={{ mickey_codex_local_home | quote }}
+        ;;
+    esac
     EOF
 
     if [ -f {{ mickey_codex_profile_script_path | quote }} ] && cmp -s "$tmp" {{ mickey_codex_profile_script_path | quote }}; then

@@ -5,7 +5,7 @@ This root module provisions the Mickey guest VMs in Proxmox and renders a genera
 ## Scope
 
 - clone and create guest VMs declared in one keyed VM map
-- currently provision `mickey-infra`, `mickey-erp`, `mickey-thud`, and `mickey-scarthgap` from the committed prod inputs
+- currently provision `mickey-infra`, `mickey-erp`, `mickey-thud`, `mickey-scarthgap`, and `mickey-brimstone` from the committed prod inputs
 - attach optional extra disks and USB passthrough devices declared on those guests
 - inject SSH keys and static network configuration through cloud-init
 - render `ansible/inventory/hosts.generated.yml`, including role groups and `consul_client_vms`

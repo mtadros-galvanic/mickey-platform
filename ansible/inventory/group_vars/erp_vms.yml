@@ -12,3 +12,7 @@ mickey_erp_share_name: mickey-share
 mickey_erp_share_server: "{{ hostvars['mickey-infra'].ansible_host | default('10.25.1.206') }}"
 mickey_erp_share_credentials_path: /etc/mickey-platform/mickey-infra-share.credentials
 mickey_erp_share_fstab_options: "credentials={{ mickey_erp_share_credentials_path }},uid={{ mickey_guest_admin_user }},gid={{ mickey_guest_admin_user }},vers=3.0,file_mode=0660,dir_mode=0770,mfsymlinks,_netdev,nofail,x-systemd.automount"
+mickey_erp_fast_share_mount_path: "{{ mickey_fast_shared_mount_path }}"
+mickey_erp_fast_share_name: mickey-shared-fast
+mickey_erp_fast_share_server: "{{ mickey_erp_share_server }}"
+mickey_erp_fast_share_fstab_options: "{{ mickey_erp_share_fstab_options }}"

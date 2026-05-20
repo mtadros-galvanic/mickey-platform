@@ -7,7 +7,7 @@ WIPE_CONFIRM ?= false
 HOST_ANSIBLE_EXTRA_VARS ?=
 REIP_APPLY ?= 0
 
-.PHONY: templates templates-bionic templates-jammy templates-resolute proxmox-reip tf-init tf-plan tf-apply ansible-host ansible-infra ansible-erp ansible-utility ansible-control ansible-desktop ansible-build ansible-build-thud ansible-build-scarthgap ise7-import
+.PHONY: templates templates-bionic templates-jammy templates-resolute proxmox-reip tf-init tf-plan tf-apply ansible-host ansible-infra ansible-erp ansible-utility ansible-control ansible-desktop ansible-build ansible-build-thud ansible-build-scarthgap ansible-build-brimstone ise7-import
 
 templates:
 	BUILD_DESKTOP_TEMPLATE=0 "$(ROOT)scripts/build-proxmox-templates.sh"
@@ -73,6 +73,9 @@ ansible-build-thud:
 
 ansible-build-scarthgap:
 	"$(ROOT)scripts/run-ansible.sh" "$(ROOT)ansible/playbooks/build-scarthgap-vm.yml" "$(ANSIBLE_BASE_INVENTORY)" "$(ANSIBLE_GENERATED_INVENTORY)"
+
+ansible-build-brimstone:
+	"$(ROOT)scripts/run-ansible.sh" "$(ROOT)ansible/playbooks/build-brimstone-vm.yml" "$(ANSIBLE_BASE_INVENTORY)" "$(ANSIBLE_GENERATED_INVENTORY)"
 
 ise7-import:
 	"$(ROOT)scripts/import-win7-ise-vm.sh"

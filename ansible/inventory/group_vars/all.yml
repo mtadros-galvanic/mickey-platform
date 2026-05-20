@@ -2,6 +2,7 @@ mickey_guest_admin_user: galvanic
 mickey_guest_admin_home: "{{ '/root' if mickey_guest_admin_user == 'root' else '/home/' ~ mickey_guest_admin_user }}"
 
 mickey_shared_mount_path: /mnt/mickey-share
+mickey_fast_shared_mount_path: /mnt/mickey-shared-fast
 
 # Playbooks that install Codex set mickey_codex_node_version explicitly.
 mickey_codex_node_arch: "linux-x64"
@@ -12,30 +13,38 @@ mickey_codex_node_archive_url: "https://nodejs.org/dist/v{{ mickey_codex_node_ve
 mickey_codex_local_bin_dir: "{{ mickey_guest_admin_home }}/.local/bin"
 mickey_codex_shell_home: "{{ mickey_guest_admin_home }}/.codex"
 mickey_codex_shell_backup_home: "{{ mickey_guest_admin_home }}/.codex.local-pre-share"
-mickey_codex_shared_root: "{{ mickey_shared_mount_path }}/admin/codex"
+mickey_codex_legacy_shared_root: "{{ mickey_shared_mount_path }}/admin/codex"
+mickey_codex_shared_root: "{{ mickey_fast_shared_mount_path }}/admin/codex"
 mickey_codex_hosts_root: "{{ mickey_codex_shared_root }}/hosts"
-mickey_codex_local_home: "{{ mickey_codex_hosts_root }}/{{ inventory_hostname }}"
+mickey_codex_shared_host_home: "{{ mickey_codex_hosts_root }}/{{ inventory_hostname }}"
+mickey_codex_legacy_tmp_mount_path: "{{ mickey_codex_legacy_shared_root }}/hosts/{{ inventory_hostname }}/tmp"
 mickey_codex_local_state_root: "{{ mickey_guest_admin_home }}/.local/state/codex"
+mickey_codex_local_home: "{{ mickey_codex_local_state_root }}/home"
 mickey_codex_local_tmp_path: "{{ mickey_codex_local_state_root }}/tmp"
 mickey_codex_tmp_mount_path: "{{ mickey_codex_local_home }}/tmp"
+mickey_codex_shared_tmp_mount_path: "{{ mickey_codex_shared_host_home }}/tmp"
 mickey_codex_local_auth_path: "{{ mickey_codex_local_home }}/auth.json"
 mickey_codex_local_auth_backup_path: "{{ mickey_codex_local_home }}/auth.json.local-backup"
 mickey_codex_local_skills_path: "{{ mickey_codex_local_home }}/skills"
 mickey_codex_local_skills_backup_path: "{{ mickey_codex_local_home }}/skills.local-backup"
-mickey_codex_npm_bin_path: "{{ mickey_guest_admin_home }}/.local/node_modules/.bin/codex"
+mickey_codex_npm_bin_path: "{{ mickey_codex_node_install_dir }}/bin/codex"
 mickey_codex_wrapper_path: "{{ mickey_codex_local_bin_dir }}/codex"
 mickey_codex_real_bin_path: "{{ mickey_codex_local_bin_dir }}/codex-real"
+mickey_codex_update_path: /usr/local/bin/codex-update
 mickey_codex_sync_script_path: /usr/local/bin/mickey-codex-sync-auth
 mickey_codex_profile_script_path: /etc/profile.d/mickey-codex.sh
+mickey_codex_sandbox_sysctl_path: /etc/sysctl.d/99-mickey-codex-sandbox.conf
+mickey_codex_sandbox_userns_enable: true
 mickey_codex_shared_auth_path: "{{ mickey_codex_shared_root }}/auth.json"
 mickey_codex_shared_skills_path: "{{ mickey_codex_shared_root }}/skills"
 mickey_codex_shared_auth_enable: true
 mickey_codex_package: "@openai/codex"
-mickey_codex_version: "0.125.0"
+mickey_codex_version: ""
 mickey_codex_enable: true
 
 mickey_dotfiles_enable: true
 mickey_dotfiles_packages:
+  - git
   - tmux
   - zsh
 mickey_dotfiles_set_default_shell: true
@@ -50,6 +59,18 @@ mickey_dotfiles_tmux_archive_checksum_map:
   linux-x86_64: "sha256:c0a772a5e6ca8f129b0111d10029a52e02bcbc8352d5a8c0d3de8466a1e59c2e"
   linux-arm64: "sha256:bb5afd9d646df54a7d7c66e198aa22c7d293c7453534f1670f7c540534db8b5e"
 mickey_dotfiles_tmux_bin_path: /usr/local/bin/tmux
+mickey_dotfiles_tmux_plugin_root: "{{ mickey_guest_admin_home }}/.tmux/plugins"
+mickey_dotfiles_tmux_plugins:
+  - name: tpm
+    repo: https://github.com/tmux-plugins/tpm.git
+  - name: tmux-sensible
+    repo: https://github.com/tmux-plugins/tmux-sensible.git
+  - name: vim-tmux-navigator
+    repo: https://github.com/christoomey/vim-tmux-navigator.git
+  - name: catppuccin-tmux
+    repo: https://github.com/dreamsofcode-io/catppuccin-tmux.git
+  - name: tmux-yank
+    repo: https://github.com/tmux-plugins/tmux-yank.git
 mickey_dotfiles_starship_version: "1.25.0"
 mickey_dotfiles_starship_asset_name: starship-x86_64-unknown-linux-musl.tar.gz
 mickey_dotfiles_starship_archive_url: "https://github.com/starship/starship/releases/download/v{{ mickey_dotfiles_starship_version }}/{{ mickey_dotfiles_starship_asset_name }}"

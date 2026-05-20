@@ -20,3 +20,14 @@
    valid users = {{ mickey_samba_username }}
    create mask = 0660
    directory mask = 0770
+
+{% if mickey_fast_share_name is defined and mickey_fast_share_mount_path is defined %}
+[{{ mickey_fast_share_name }}]
+   path = {{ mickey_fast_share_mount_path }}
+   browseable = yes
+   read only = no
+   guest ok = no
+   valid users = {{ mickey_samba_username }}
+   create mask = 0660
+   directory mask = 0770
+{% endif %}

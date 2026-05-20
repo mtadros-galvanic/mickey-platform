@@ -12,6 +12,10 @@ mickey_infra_apt_packages:
 mickey_share_mount_path: /srv/share
 mickey_share_alias_mount_path: "{{ mickey_shared_mount_path }}"
 mickey_share_name: mickey-share
+mickey_fast_share_mount_path: /srv/mickey-shared-fast
+mickey_fast_share_alias_mount_path: "{{ mickey_fast_shared_mount_path }}"
+mickey_fast_share_name: mickey-shared-fast
+mickey_fast_share_label: mickey-shared-fast
 mickey_share_workgroup: WORKGROUP
 mickey_share_allowed_hosts:
   - 127.0.0.1

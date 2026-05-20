@@ -52,6 +52,14 @@
         group: "{{ mickey_guest_admin_user }}"
         mode: "0770"
 
+    - name: Ensure the utility fast share mount path exists
+      ansible.builtin.file:
+        path: "{{ mickey_utility_fast_share_mount_path }}"
+        state: directory
+        owner: "{{ mickey_guest_admin_user }}"
+        group: "{{ mickey_guest_admin_user }}"
+        mode: "0770"
+
     - name: Ensure the utility share credential directory exists
       ansible.builtin.file:
         path: /etc/mickey-platform
@@ -91,6 +99,26 @@
       register: mickey_utility_share_fstab_result
       changed_when: "'changed' in mickey_utility_share_fstab_result.stdout"
 
+    - name: Persist the utility fast share automount in fstab
+      ansible.builtin.raw: |
+        set -eu
+        line="//{{ mickey_utility_fast_share_server }}/{{ mickey_utility_fast_share_name }} {{ mickey_utility_fast_share_mount_path }} cifs {{ mickey_utility_fast_share_fstab_options }} 0 0"
+        tmp="$(mktemp)"
+        trap 'rm -f "$tmp"' EXIT
+        current_count="$(grep -Fc " {{ mickey_utility_fast_share_mount_path }} cifs " /etc/fstab || true)"
+
+        if grep -Fqx "$line" /etc/fstab && [ "$current_count" -eq 1 ]; then
+          exit 0
+        fi
+
+        grep -v " {{ mickey_utility_fast_share_mount_path }} cifs " /etc/fstab > "$tmp" || true
+        printf '%s\n' "$line" >> "$tmp"
+        cat "$tmp" > /etc/fstab
+        systemctl daemon-reload
+        echo changed
+      register: mickey_utility_fast_share_fstab_result
+      changed_when: "'changed' in mickey_utility_fast_share_fstab_result.stdout"
+
     - name: Reload systemd to pick up the utility automount
       ansible.builtin.systemd:
         daemon_reload: true
@@ -106,6 +134,22 @@
     - name: Mount the utility share now that the fstab entry exists
       ansible.builtin.shell: |
         mount_point={{ mickey_utility_share_mount_path | quote }}
+        if mountpoint -q "$mount_point"; then
+          options="$(findmnt -no OPTIONS --target "$mount_point" || true)"
+          if printf '%s\n' "$options" | grep -qw mfsymlinks; then
+            mount -o remount "$mount_point"
+            exit 0
+          fi
+          umount "$mount_point"
+        fi
+        mount "$mount_point"
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Mount the utility fast share now that the fstab entry exists
+      ansible.builtin.shell: |
+        mount_point={{ mickey_utility_fast_share_mount_path | quote }}
         if mountpoint -q "$mount_point"; then
           options="$(findmnt -no OPTIONS --target "$mount_point" || true)"
           if printf '%s\n' "$options" | grep -qw mfsymlinks; then

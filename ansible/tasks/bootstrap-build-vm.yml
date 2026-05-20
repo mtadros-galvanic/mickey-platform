@@ -62,6 +62,11 @@
           ((playbook_dir | dirname) ~ '/files/ssh/gitlab.ibeeto')
         ]
         if inventory_hostname == 'mickey-thud'
+        else [
+          ((playbook_dir | dirname) ~ '/files/ssh/config'),
+          ((playbook_dir | dirname) ~ '/files/ssh/mt-github')
+        ]
+        if inventory_hostname in ['mickey-brimstone']
         else []
       }}
 
@@ -163,6 +168,7 @@
   ansible.builtin.raw: |
     install -d -m 0755 /etc/mickey-platform
     install -d -m 0770 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} {{ mickey_build_share_mount_path | quote }}
+    install -d -m 0770 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} {{ mickey_build_fast_share_mount_path | quote }}
 
 - name: Install the build share credentials file
   ansible.builtin.raw: |
@@ -186,6 +192,22 @@
     fi
 
     grep -v " {{ mickey_build_share_mount_path }} cifs " /etc/fstab > "$tmp" || true
+    printf '%s\n' "$line" >> "$tmp"
+    cat "$tmp" > /etc/fstab
+    systemctl daemon-reload
+
+- name: Persist the build fast share automount in fstab
+  ansible.builtin.raw: |
+    set -eu
+    line="//{{ mickey_build_fast_share_server }}/{{ mickey_build_fast_share_name }} {{ mickey_build_fast_share_mount_path }} cifs {{ mickey_build_fast_share_fstab_options }} 0 0"
+    tmp="$(mktemp)"
+    trap 'rm -f "$tmp"' EXIT
+
+    if grep -Fqx "$line" /etc/fstab; then
+      exit 0
+    fi
+
+    grep -v " {{ mickey_build_fast_share_mount_path }} cifs " /etc/fstab > "$tmp" || true
     printf '%s\n' "$line" >> "$tmp"
     cat "$tmp" > /etc/fstab
     systemctl daemon-reload
@@ -240,6 +262,20 @@
 - name: Mount the build share now that the fstab entry exists
   ansible.builtin.raw: |
     mount_point={{ mickey_build_share_mount_path | quote }}
+    if mountpoint -q "$mount_point"; then
+      options="$(findmnt -no OPTIONS --target "$mount_point" || true)"
+      if printf '%s\n' "$options" | grep -qw mfsymlinks; then
+        mount -o remount "$mount_point"
+        exit 0
+      fi
+      umount "$mount_point"
+    fi
+    mount "$mount_point"
+  changed_when: false
+
+- name: Mount the build fast share now that the fstab entry exists
+  ansible.builtin.raw: |
+    mount_point={{ mickey_build_fast_share_mount_path | quote }}
     if mountpoint -q "$mount_point"; then
       options="$(findmnt -no OPTIONS --target "$mount_point" || true)"
       if printf '%s\n' "$options" | grep -qw mfsymlinks; then
