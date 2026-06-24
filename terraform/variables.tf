@@ -112,6 +112,7 @@ variable "vms" {
     memory_balloon_mb    = optional(number)
     os_disk_gb           = number
     os_disk_datastore_id = optional(string)
+    os_disk_iothread     = optional(bool)
     lan_ipv4_cidr        = string
     started              = optional(bool, true)
     on_boot              = optional(bool, true)
@@ -120,6 +121,7 @@ variable "vms" {
       datastore_id = string
       interface    = string
       size_gb      = number
+      iothread     = optional(bool, false)
     })), [])
     usb_devices = optional(list(object({
       host    = optional(string)

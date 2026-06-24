@@ -54,6 +54,9 @@
         state: present
         update_cache: true
 
+    - name: Install the pinned GitHub CLI release
+      ansible.builtin.include_tasks: ../tasks/install-github-cli.yml
+
     - name: Confirm the bulk disk device exists
       ansible.builtin.command: "lsblk -dn -o PATH {{ mickey_bulk_disk_device }}"
       register: mickey_bulk_disk_probe

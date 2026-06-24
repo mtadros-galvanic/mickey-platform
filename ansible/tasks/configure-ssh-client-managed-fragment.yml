@@ -1,0 +1,84 @@
+---
+- name: Ensure the bootstrap user's SSH client config directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ mickey_guest_admin_user }}"
+    group: "{{ mickey_guest_admin_user }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ mickey_guest_admin_home }}/.ssh"
+      mode: "0700"
+    - path: "{{ mickey_guest_admin_home }}/.ssh/config.d"
+      mode: "0700"
+
+- name: Install the managed Mickey SSH client config fragment
+  ansible.builtin.copy:
+    dest: "{{ mickey_guest_admin_home }}/.ssh/config.d/mickey-managed.conf"
+    content: "{{ mickey_ssh_client_managed_fragment_content }}"
+    owner: "{{ mickey_guest_admin_user }}"
+    group: "{{ mickey_guest_admin_user }}"
+    mode: "0600"
+
+- name: Ensure the bootstrap user's SSH config includes managed fragments
+  ansible.builtin.raw: |
+    set -eu
+    config={{ (mickey_guest_admin_home ~ '/.ssh/config') | quote }}
+    fragment={{ (mickey_guest_admin_home ~ '/.ssh/config.d/mickey-managed.conf') | quote }}
+    include_line='Include ~/.ssh/config.d/*.conf'
+
+    before=""
+    if [ -f "$config" ]; then
+      before="$(sha256sum "$config" | awk '{print $1}')"
+    fi
+
+    install -d -m 0700 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} "$(dirname "$config")"
+
+    python3 - "$config" "$fragment" "$include_line" <<'PY'
+    import sys
+
+    config_path, fragment_path, include_line = sys.argv[1:4]
+
+    try:
+        with open(config_path, "r", encoding="utf-8") as fh:
+            text = fh.read()
+    except FileNotFoundError:
+        text = ""
+
+    with open(fragment_path, "r", encoding="utf-8") as fh:
+        fragment = fh.read()
+
+    def strip_managed_prefix(value: str, managed: str) -> str:
+        candidates = []
+        for candidate in (managed, managed.rstrip("\n") + "\n", managed.rstrip("\n")):
+            if candidate not in candidates:
+                candidates.append(candidate)
+
+        for candidate in candidates:
+            if candidate and value.startswith(candidate):
+                return value[len(candidate):].lstrip("\n")
+
+        return value
+
+    text = strip_managed_prefix(text, fragment)
+    lines = [line for line in text.splitlines() if line.strip() != include_line]
+    remaining = "\n".join(lines).strip("\n")
+
+    if remaining:
+        new_text = f"{include_line}\n\n{remaining}\n"
+    else:
+        new_text = f"{include_line}\n"
+
+    with open(config_path, "w", encoding="utf-8") as fh:
+        fh.write(new_text)
+    PY
+
+    chown {{ mickey_guest_admin_user | quote }}:{{ mickey_guest_admin_user | quote }} "$config"
+    chmod 0600 "$config"
+
+    after="$(sha256sum "$config" | awk '{print $1}')"
+    if [ "$before" != "$after" ]; then
+      echo changed
+    fi
+  register: mickey_ssh_client_include_result
+  changed_when: "'changed' in mickey_ssh_client_include_result.stdout"

@@ -1,0 +1,144 @@
+---
+- name: Disable online discard on the root filesystem
+  ansible.builtin.raw: |
+    set -eu
+    tmp="$(mktemp)"
+    trap 'rm -f "$tmp"' EXIT
+
+    sed -E \
+      -e '/[[:space:]]\/[[:space:]]/ s/(^|[[:space:]])discard,/\1/' \
+      -e '/[[:space:]]\/[[:space:]]/ s/,discard([[:space:]]|$)/\1/' \
+      -e '/[[:space:]]\/[[:space:]]/ s/([[:space:]])discard([[:space:]])/\1defaults\2/' \
+      /etc/fstab > "$tmp"
+
+    if ! cmp -s "$tmp" /etc/fstab; then
+      cp /etc/fstab "/etc/fstab.mickey-platform-before-nodiscard-$(date +%Y%m%d%H%M%S)"
+      cat "$tmp" > /etc/fstab
+      systemctl daemon-reload
+      echo changed
+    fi
+
+    if findmnt -no OPTIONS / | grep -Eq '(^|,)discard(,|$)'; then
+      mount -o remount,nodiscard / || mount -o remount /
+      echo changed
+    fi
+  register: mickey_root_discard_result
+  changed_when: "'changed' in mickey_root_discard_result.stdout"
+
+- name: Enable periodic filesystem trim when available
+  ansible.builtin.raw: |
+    set -eu
+    if ! systemctl list-unit-files fstrim.timer --no-legend 2>/dev/null | grep -q '^fstrim\.timer'; then
+      exit 0
+    fi
+
+    before="$(systemctl is-enabled fstrim.timer 2>/dev/null || true)/$(systemctl is-active fstrim.timer 2>/dev/null || true)"
+    systemctl enable --now fstrim.timer >/dev/null
+    after="$(systemctl is-enabled fstrim.timer 2>/dev/null || true)/$(systemctl is-active fstrim.timer 2>/dev/null || true)"
+
+    if [ "$before" != "$after" ]; then
+      echo changed
+    fi
+  register: mickey_fstrim_timer_result
+  changed_when: "'changed' in mickey_fstrim_timer_result.stdout"
+
+- name: Install the VM base package layer with apt
+  ansible.builtin.apt:
+    name: "{{ mickey_vm_apt_packages }}"
+    state: present
+    update_cache: true
+  when: mickey_vm_base_package_install_method == 'apt'
+
+- name: Install the VM base package layer with raw apt
+  ansible.builtin.raw: |
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get -o Acquire::ForceIPv4=true update
+    apt-get -o Acquire::ForceIPv4=true install -y {{ mickey_vm_apt_packages | join(' ') }}
+  when: mickey_vm_base_package_install_method == 'raw'
+
+- name: Install GitHub CLI in the VM base layer
+  ansible.builtin.include_tasks: ../tasks/install-github-cli.yml
+
+- name: Install Herdr in the VM base layer
+  ansible.builtin.raw: |
+    set -eu
+    current_version="$({{ mickey_herdr_bin_path | quote }} --version 2>/dev/null | awk '{ print $2 }' | sed 's/^v//' || true)"
+    target_version={{ mickey_herdr_version | quote }}
+
+    if [ "$current_version" = "$target_version" ]; then
+      exit 0
+    fi
+
+    machine="$(uname -m)"
+    case "$machine" in
+      x86_64|amd64) release_arch={{ mickey_herdr_release_arch_map['x86_64'] | quote }} ;;
+      aarch64|arm64) release_arch={{ mickey_herdr_release_arch_map['aarch64'] | quote }} ;;
+      *) echo "unsupported Herdr architecture: $machine" >&2; exit 1 ;;
+    esac
+
+    tmp="$(mktemp)"
+    trap 'rm -f "$tmp"' EXIT
+    curl -fsSL --retry 3 --connect-timeout 10 --max-time 120 \
+      {{ mickey_herdr_release_base_url | quote }}/herdr-linux-"$release_arch" \
+      -o "$tmp"
+    install -D -m 0755 -o root -g root "$tmp" {{ mickey_herdr_bin_path | quote }}
+
+    {{ mickey_herdr_bin_path | quote }} --version >/dev/null
+    echo changed
+  register: mickey_herdr_install_result
+  changed_when: "'changed' in mickey_herdr_install_result.stdout"
+  when: mickey_herdr_enable | default(false) | bool
+
+- name: Install D2 in the VM base layer
+  ansible.builtin.raw: |
+    set -eu
+    current_version="$({{ mickey_d2_bin_path | quote }} --version 2>/dev/null | sed 's/^v//' || true)"
+    target_version={{ mickey_d2_version | quote }}
+
+    if [ "$current_version" = "$target_version" ]; then
+      exit 0
+    fi
+
+    machine="$(uname -m)"
+    case "$machine" in
+      x86_64|amd64) release_arch={{ mickey_d2_release_arch_map['x86_64'] | quote }} ;;
+      aarch64|arm64) release_arch={{ mickey_d2_release_arch_map['aarch64'] | quote }} ;;
+      *) echo "unsupported D2 architecture: $machine" >&2; exit 1 ;;
+    esac
+
+    tmpdir="$(mktemp -d)"
+    trap 'rm -rf "$tmpdir"' EXIT
+    archive="$tmpdir/d2.tar.gz"
+    curl -fsSL --retry 3 --connect-timeout 10 --max-time 120 \
+      {{ mickey_d2_release_base_url | quote }}/d2-v"$target_version"-linux-"$release_arch".tar.gz \
+      -o "$archive"
+    tar --warning=no-unknown-keyword -xzf "$archive" -C "$tmpdir"
+
+    install -D -m 0755 -o root -g root \
+      "$tmpdir/d2-v$target_version/bin/d2" \
+      {{ mickey_d2_bin_path | quote }}
+    install -D -m 0644 -o root -g root \
+      "$tmpdir/d2-v$target_version/man/d2.1" \
+      /usr/local/share/man/man1/d2.1
+
+    {{ mickey_d2_bin_path | quote }} --version >/dev/null
+    echo changed
+  register: mickey_d2_install_result
+  changed_when: "'changed' in mickey_d2_install_result.stdout"
+  when: mickey_d2_enable | default(false) | bool
+
+- name: Ensure the bootstrap user is configured
+  ansible.builtin.include_tasks: ../tasks/bootstrap-admin-user.yml
+  when: mickey_vm_base_configure_admin_user | bool
+
+- name: Set the VM hostname
+  ansible.builtin.hostname:
+    name: "{{ inventory_hostname }}"
+  when: mickey_vm_base_configure_hostname | bool
+
+- name: Ensure the VM hosts file has the expected local hostname mapping
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^127\\.0\\.1\\.1\\s+'
+    line: "127.0.1.1 {{ mickey_guest_fqdn }} {{ inventory_hostname }}"
+  when: mickey_vm_base_configure_hostname | bool

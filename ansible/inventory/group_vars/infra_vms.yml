@@ -1,13 +1,10 @@
-mickey_infra_apt_packages:
-  - bubblewrap
-  - ca-certificates
-  - curl
+mickey_infra_extra_apt_packages:
   - docker-compose-v2
   - docker.io
-  - git
-  - qemu-guest-agent
+  - dnsmasq
   - samba
-  - xz-utils
+mickey_infra_apt_packages: "{{ (mickey_vm_base_apt_packages + mickey_infra_extra_apt_packages) | unique }}"
+mickey_vm_apt_packages: "{{ mickey_infra_apt_packages }}"
 
 mickey_share_mount_path: /srv/share
 mickey_share_alias_mount_path: "{{ mickey_shared_mount_path }}"

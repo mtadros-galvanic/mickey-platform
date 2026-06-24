@@ -7,7 +7,9 @@ mickey_proxmox_apt_packages:
   - curl
   - e2fsprogs
   - git
+  - gh
   - parted
+  - shellcheck
   - util-linux
   - xz-utils
 

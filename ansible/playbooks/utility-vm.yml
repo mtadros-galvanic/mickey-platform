@@ -6,7 +6,6 @@
 
   vars:
     mickey_guest_admin_password_hash: "{{ guests.admin_password_hash | default(guests.extra_vm_admin_password_hash | default('')) if (guests is defined) else '' }}"
-    mickey_guest_fqdn: "{{ inventory_hostname }}.galvanic.local"
     mickey_utility_share_mount_username: "{{ (samba.username | default(mickey_guest_admin_user)) if (samba is defined) else mickey_guest_admin_user }}"
     mickey_codex_node_version: "24.15.0"
 
@@ -25,24 +24,8 @@
         or (samba.password | string | length) == 0
 
   tasks:
-    - name: Install utility baseline packages
-      ansible.builtin.apt:
-        name: "{{ mickey_utility_apt_packages }}"
-        state: present
-        update_cache: true
-
-    - name: Ensure the bootstrap user is configured
-      ansible.builtin.include_tasks: ../tasks/bootstrap-admin-user.yml
-
-    - name: Set the utility hostname
-      ansible.builtin.hostname:
-        name: "{{ inventory_hostname }}"
-
-    - name: Ensure the utility hosts file has the expected local hostname mapping
-      ansible.builtin.lineinfile:
-        path: /etc/hosts
-        regexp: '^127\\.0\\.1\\.1\\s+'
-        line: "127.0.1.1 {{ mickey_guest_fqdn }} {{ inventory_hostname }}"
+    - name: Apply the shared VM base layer to the utility guest
+      ansible.builtin.include_tasks: ../tasks/bootstrap-vm-base.yml
 
     - name: Ensure the utility share mount path exists
       ansible.builtin.file:
@@ -163,11 +146,8 @@
         executable: /bin/bash
       changed_when: false
 
-    - name: Install Codex tooling for the utility guest
-      ansible.builtin.include_tasks: ../tasks/install-codex-cli.yml
-
-    - name: Point the utility guest at the shared Codex auth file when present
-      ansible.builtin.include_tasks: ../tasks/configure-codex-auth.yml
+    - name: Apply the shared VM admin tooling layer to the utility guest
+      ansible.builtin.include_tasks: ../tasks/configure-vm-admin-tooling.yml
 
     - name: Publish fd on PATH for Ubuntu guests
       ansible.builtin.file:
@@ -176,9 +156,6 @@
         state: link
         force: true
       when: "'fd-find' in mickey_utility_apt_packages"
-
-    - name: Install the curated admin dotfiles on the utility guest
-      ansible.builtin.include_tasks: ../tasks/configure-admin-dotfiles.yml
 
     - name: Sync the Mickey projects tree onto utility guests
       ansible.builtin.include_tasks: ../tasks/sync-utility-projects.yml

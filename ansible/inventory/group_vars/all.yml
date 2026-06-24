@@ -1,8 +1,68 @@
 mickey_guest_admin_user: galvanic
 mickey_guest_admin_home: "{{ '/root' if mickey_guest_admin_user == 'root' else '/home/' ~ mickey_guest_admin_user }}"
+mickey_guest_admin_password_hash: "{{ guests.admin_password_hash | default(guests.extra_vm_admin_password_hash | default(guests.desktop_admin_password_hash | default(''))) if (guests is defined) else '' }}"
+mickey_guest_fqdn: "{{ inventory_hostname }}.galvanic.local"
 
 mickey_shared_mount_path: /mnt/mickey-share
 mickey_fast_shared_mount_path: /mnt/mickey-shared-fast
+
+mickey_vm_base_apt_packages:
+  - bubblewrap
+  - ca-certificates
+  - curl
+  - git
+  - iputils-ping
+  - jq
+  - mosh
+  - python3
+  - qemu-guest-agent
+  - ripgrep
+  - rsync
+  - shellcheck
+  - tree
+  - unzip
+  - wget
+  - xz-utils
+  - zip
+mickey_vm_apt_packages: "{{ mickey_vm_base_apt_packages }}"
+mickey_vm_base_package_install_method: apt
+mickey_vm_base_configure_admin_user: true
+mickey_vm_base_configure_hostname: true
+mickey_vm_base_configure_codex: true
+mickey_vm_base_configure_codex_auth: true
+mickey_vm_base_configure_dotfiles: true
+mickey_vm_base_configure_consul: "{{ 'consul_client_vms' in group_names }}"
+
+mickey_herdr_enable: true
+mickey_herdr_version: "0.6.2"
+mickey_herdr_release_base_url: "https://github.com/ogulcancelik/herdr/releases/download/v{{ mickey_herdr_version }}"
+mickey_herdr_release_arch_map:
+  x86_64: x86_64
+  amd64: x86_64
+  aarch64: aarch64
+  arm64: aarch64
+mickey_herdr_install_dir: /usr/local/bin
+mickey_herdr_bin_path: "{{ mickey_herdr_install_dir }}/herdr"
+
+mickey_d2_enable: true
+mickey_d2_version: "0.7.1"
+mickey_d2_release_base_url: "https://github.com/terrastruct/d2/releases/download/v{{ mickey_d2_version }}"
+mickey_d2_release_arch_map:
+  x86_64: amd64
+  amd64: amd64
+  aarch64: arm64
+  arm64: arm64
+mickey_d2_install_dir: /usr/local/bin
+mickey_d2_bin_path: "{{ mickey_d2_install_dir }}/d2"
+
+mickey_gh_enable: true
+mickey_gh_version: "2.93.0"
+mickey_gh_release_base_url: "https://github.com/cli/cli/releases/download/v{{ mickey_gh_version }}"
+mickey_gh_release_arch_map:
+  x86_64: amd64
+  amd64: amd64
+  aarch64: arm64
+  arm64: arm64
 
 # Playbooks that install Codex set mickey_codex_node_version explicitly.
 mickey_codex_node_arch: "linux-x64"
@@ -27,7 +87,10 @@ mickey_codex_local_auth_path: "{{ mickey_codex_local_home }}/auth.json"
 mickey_codex_local_auth_backup_path: "{{ mickey_codex_local_home }}/auth.json.local-backup"
 mickey_codex_local_skills_path: "{{ mickey_codex_local_home }}/skills"
 mickey_codex_local_skills_backup_path: "{{ mickey_codex_local_home }}/skills.local-backup"
-mickey_codex_npm_bin_path: "{{ mickey_codex_node_install_dir }}/bin/codex"
+mickey_codex_private_skills_path: "{{ mickey_codex_shared_host_home }}/skills"
+mickey_codex_install_script_url: https://chatgpt.com/codex/install.sh
+mickey_codex_standalone_bin_dir: "{{ mickey_guest_admin_home }}/.local/lib/codex/bin"
+mickey_codex_standalone_bin_path: "{{ mickey_codex_standalone_bin_dir }}/codex"
 mickey_codex_wrapper_path: "{{ mickey_codex_local_bin_dir }}/codex"
 mickey_codex_real_bin_path: "{{ mickey_codex_local_bin_dir }}/codex-real"
 mickey_codex_update_path: /usr/local/bin/codex-update
@@ -38,9 +101,62 @@ mickey_codex_sandbox_userns_enable: true
 mickey_codex_shared_auth_path: "{{ mickey_codex_shared_root }}/auth.json"
 mickey_codex_shared_skills_path: "{{ mickey_codex_shared_root }}/skills"
 mickey_codex_shared_auth_enable: true
-mickey_codex_package: "@openai/codex"
+mickey_codex_global_mcp_servers:
+  - name: galvanic-ui
+    url: http://galvanic-ui.mickey.galvanic.com/mcp
 mickey_codex_version: ""
 mickey_codex_enable: true
+
+mickey_pnpm_enable: true
+mickey_pnpm_version: "11.5.2"
+mickey_pnpm_use_corepack_shims: true
+mickey_pnpm_store_root: "{{ mickey_fast_shared_mount_path }}/admin/pnpm/hosts"
+mickey_pnpm_store_dir: "{{ mickey_pnpm_store_root }}/{{ inventory_hostname }}/store"
+
+mickey_github_packages_auth_enable: true
+mickey_github_packages_config_dir: "{{ mickey_guest_admin_home }}/.config/galvanic"
+mickey_github_packages_env_path: "{{ mickey_github_packages_config_dir }}/github.env"
+mickey_github_packages_scope: "@galvanicappliedsciences"
+mickey_github_packages_registry: "https://npm.pkg.github.com"
+
+mickey_pm2_enable: true
+mickey_pm2_version: "7.0.1"
+mickey_pm2_commands:
+  - pm2
+  - pm2-dev
+  - pm2-runtime
+  - pm2-docker
+
+mickey_mermaid_cli_enable: true
+mickey_mermaid_cli_package: "@mermaid-js/mermaid-cli"
+mickey_mermaid_cli_version: "11.15.0"
+mickey_mermaid_cli_commands:
+  - mmdc
+mickey_mermaid_cli_browser_apt_package_choices:
+  - fonts-liberation
+  - libasound2|libasound2t64
+  - libatk-bridge2.0-0|libatk-bridge2.0-0t64
+  - libatk1.0-0|libatk1.0-0t64
+  - libatspi2.0-0|libatspi2.0-0t64
+  - libcairo2
+  - libcups2|libcups2t64
+  - libdbus-1-3
+  - libdrm2
+  - libgbm1
+  - libglib2.0-0|libglib2.0-0t64
+  - libgtk-3-0|libgtk-3-0t64
+  - libnspr4
+  - libnss3
+  - libpango-1.0-0
+  - libx11-xcb1
+  - libxcb1
+  - libxcomposite1
+  - libxdamage1
+  - libxfixes3
+  - libxkbcommon0
+  - libxrandr2
+  - libxss1
+  - xdg-utils
 
 mickey_dotfiles_enable: true
 mickey_dotfiles_packages:

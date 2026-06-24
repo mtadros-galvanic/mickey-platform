@@ -55,8 +55,8 @@
 
     if [ -n "$missing_packages" ]; then
       export DEBIAN_FRONTEND=noninteractive
-      apt-get update
-      apt-get install -y $missing_packages
+      apt-get -o Acquire::ForceIPv4=true update
+      apt-get -o Acquire::ForceIPv4=true install -y $missing_packages
       echo changed
     fi
   register: mickey_dotfiles_package_result

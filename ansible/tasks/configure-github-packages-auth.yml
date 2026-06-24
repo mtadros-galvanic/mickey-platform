@@ -1,0 +1,63 @@
+---
+- name: Fail when the Galvanic GitHub Packages token is missing
+  ansible.builtin.fail:
+    msg: "github.galvanic_token must be present in the secrets file to configure GitHub Packages auth."
+  when: >-
+    mickey_github_packages_auth_enable | bool
+    and (
+      github is not defined
+      or github.galvanic_token is not defined
+      or (github.galvanic_token | string | length) == 0
+    )
+
+- name: Ensure the Galvanic config directory exists
+  ansible.builtin.file:
+    path: "{{ mickey_github_packages_config_dir }}"
+    state: directory
+    owner: "{{ mickey_guest_admin_user }}"
+    group: "{{ mickey_guest_admin_user }}"
+    mode: "0700"
+  when: mickey_github_packages_auth_enable | bool
+
+- name: Install the Galvanic GitHub token environment file
+  ansible.builtin.copy:
+    dest: "{{ mickey_github_packages_env_path }}"
+    content: |
+      export GITHUB_GALVANIC_TOKEN={{ github.galvanic_token | quote }}
+    owner: "{{ mickey_guest_admin_user }}"
+    group: "{{ mickey_guest_admin_user }}"
+    mode: "0600"
+  no_log: true
+  when: mickey_github_packages_auth_enable | bool
+
+- name: Ensure admin shells source the Galvanic GitHub token
+  ansible.builtin.blockinfile:
+    path: "{{ item }}"
+    create: true
+    owner: "{{ mickey_guest_admin_user }}"
+    group: "{{ mickey_guest_admin_user }}"
+    mode: "0644"
+    marker: "# {mark} Mickey Galvanic GitHub token"
+    block: |
+      if [ -f "$HOME/.config/galvanic/github.env" ]; then
+        . "$HOME/.config/galvanic/github.env"
+      fi
+  loop:
+    - "{{ mickey_guest_admin_home }}/.bashrc"
+    - "{{ mickey_guest_admin_home }}/.zshrc"
+    - "{{ mickey_guest_admin_home }}/.profile"
+    - "{{ mickey_guest_admin_home }}/.zprofile"
+  when: mickey_github_packages_auth_enable | bool
+
+- name: Configure npm for Galvanic GitHub Packages
+  ansible.builtin.blockinfile:
+    path: "{{ mickey_guest_admin_home }}/.npmrc"
+    create: true
+    owner: "{{ mickey_guest_admin_user }}"
+    group: "{{ mickey_guest_admin_user }}"
+    mode: "0600"
+    marker: "; {mark} Mickey Galvanic GitHub Packages"
+    block: |
+      {{ mickey_github_packages_scope }}:registry={{ mickey_github_packages_registry }}
+      //npm.pkg.github.com/:_authToken=${GITHUB_GALVANIC_TOKEN}
+  when: mickey_github_packages_auth_enable | bool

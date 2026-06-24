@@ -5,6 +5,7 @@ locals {
       role                 = "extra"
       consul_client        = false
       os_disk_datastore_id = var.fast_datastore_id
+      os_disk_iothread     = false
       started              = true
       on_boot              = true
       memory_balloon_mb    = null

@@ -7,6 +7,19 @@
   vars:
     mickey_build_share_mount_username: "{{ (samba.username | default(mickey_guest_admin_user)) if (samba is defined) else mickey_guest_admin_user }}"
     mickey_codex_node_version: "16.20.2"
+    mickey_pnpm_version: "8.15.9"
+    mickey_pnpm_use_corepack_shims: false
+    mickey_pm2_version: "6.0.14"
+    mickey_mermaid_cli_version: "10.9.1"
+    mickey_vm_apt_packages: "{{ mickey_build_apt_packages | difference(['ripgrep']) }}"
+    mickey_thud_ansible_python_version: "3.12.13"
+    mickey_thud_ansible_python_build: "20260610"
+    mickey_thud_ansible_python_install_dir: "/opt/mickey-python/cpython-{{ mickey_thud_ansible_python_version }}+{{ mickey_thud_ansible_python_build }}"
+    mickey_thud_ansible_python_archive_url: "https://github.com/astral-sh/python-build-standalone/releases/download/{{ mickey_thud_ansible_python_build }}/cpython-{{ mickey_thud_ansible_python_version }}%2B{{ mickey_thud_ansible_python_build }}-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"
+    ansible_python_interpreter: "{{ mickey_thud_ansible_python_install_dir }}/bin/python3.12"
+    mickey_consul_install_method: direct
+    mickey_consul_version: "2.0.0"
+    mickey_ripgrep_upstream_version: "13.0.0"
 
   handlers:
     - name: Validate Consul client config
@@ -18,5 +31,76 @@
         systemctl restart consul
 
   tasks:
+    - name: Install standalone Python for Ansible compatibility on Ubuntu 18
+      ansible.builtin.raw: |
+        set -eu
+        install_dir={{ mickey_thud_ansible_python_install_dir | quote }}
+        python_bin="$install_dir/bin/python3.12"
+
+        if [ -x "$python_bin" ] && "$python_bin" -c 'import sys; raise SystemExit(sys.version_info < (3, 9))'; then
+          exit 0
+        fi
+
+        tmp_dir="$(mktemp -d)"
+        trap 'rm -rf "$tmp_dir"' EXIT
+        archive="$tmp_dir/python.tar.gz"
+
+        curl -fsSL --retry 3 --connect-timeout 10 --max-time 300 \
+          {{ mickey_thud_ansible_python_archive_url | quote }} \
+          -o "$archive"
+        tar -xzf "$archive" -C "$tmp_dir"
+
+        install -d -m 0755 /opt/mickey-python
+        rm -rf "$install_dir"
+        mv "$tmp_dir/python" "$install_dir"
+        "$python_bin" -c 'import sys; raise SystemExit(sys.version_info < (3, 9))'
+        echo changed
+      register: mickey_thud_python_bootstrap_result
+      changed_when: "'changed' in mickey_thud_python_bootstrap_result.stdout"
+
+    - name: Remove the unused Deadsnakes PPA source from Ubuntu 18
+      ansible.builtin.raw: |
+        set -eu
+        changed=0
+        for path in /etc/apt/sources.list.d/deadsnakes-ubuntu-ppa-bionic.list /etc/apt/sources.list.d/deadsnakes-ubuntu-ppa-bionic.list.save; do
+          if [ -e "$path" ]; then
+            rm -f "$path"
+            changed=1
+          fi
+        done
+
+        if [ "$changed" -eq 1 ]; then
+          apt-get -o Acquire::ForceIPv4=true update
+          echo changed
+        fi
+      register: mickey_thud_deadsnakes_cleanup_result
+      changed_when: "'changed' in mickey_thud_deadsnakes_cleanup_result.stdout"
+
     - name: Run the shared build VM bootstrap for mickey-thud
       ansible.builtin.include_tasks: ../tasks/bootstrap-build-vm.yml
+
+    - name: Install upstream ripgrep for Ubuntu 18 compatibility
+      ansible.builtin.raw: |
+        set -eu
+        target_version={{ mickey_ripgrep_upstream_version | quote }}
+        current_version="$(rg --version 2>/dev/null | awk 'NR==1 { print $2 }' || true)"
+
+        if [ "$current_version" = "$target_version" ]; then
+          exit 0
+        fi
+
+        tmp_dir="$(mktemp -d)"
+        trap 'rm -rf "$tmp_dir"' EXIT
+        archive="$tmp_dir/ripgrep.tar.gz"
+        curl -fsSL --retry 3 --connect-timeout 10 --max-time 120 \
+          "https://github.com/BurntSushi/ripgrep/releases/download/${target_version}/ripgrep-${target_version}-x86_64-unknown-linux-musl.tar.gz" \
+          -o "$archive"
+        tar -xzf "$archive" -C "$tmp_dir"
+        install -D -m 0755 -o root -g root \
+          "$tmp_dir/ripgrep-${target_version}-x86_64-unknown-linux-musl/rg" \
+          /usr/local/bin/rg
+
+        /usr/local/bin/rg --version >/dev/null
+        echo changed
+      register: mickey_thud_ripgrep_result
+      changed_when: "'changed' in mickey_thud_ripgrep_result.stdout"

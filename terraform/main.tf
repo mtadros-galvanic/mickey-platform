@@ -83,6 +83,7 @@ resource "proxmox_virtual_environment_vm" "mickey" {
   disk {
     datastore_id = each.value.os_disk_datastore_id
     interface    = "scsi0"
+    iothread     = each.value.os_disk_iothread
     size         = each.value.os_disk_gb
   }
 
@@ -91,6 +92,7 @@ resource "proxmox_virtual_environment_vm" "mickey" {
     content {
       datastore_id = disk.value.datastore_id
       interface    = disk.value.interface
+      iothread     = disk.value.iothread
       size         = disk.value.size_gb
     }
   }

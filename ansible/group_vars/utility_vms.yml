@@ -1,18 +1,8 @@
-mickey_utility_apt_packages:
-  - bubblewrap
-  - ca-certificates
+mickey_utility_extra_apt_packages:
   - cifs-utils
-  - curl
   - fd-find
-  - git
-  - jq
-  - qemu-guest-agent
-  - ripgrep
-  - rsync
-  - tree
-  - unzip
-  - xz-utils
-  - zip
+mickey_utility_apt_packages: "{{ (mickey_vm_base_apt_packages + mickey_utility_extra_apt_packages) | unique }}"
+mickey_vm_apt_packages: "{{ mickey_utility_apt_packages }}"
 
 mickey_utility_projects_sync_enable: true
 mickey_utility_projects_root: "/home/{{ mickey_guest_admin_user }}/Projects"

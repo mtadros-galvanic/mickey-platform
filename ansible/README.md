@@ -74,6 +74,22 @@ This directory owns the post-install host baseline and guest bootstrap for `mick
 
 Run guest playbooks with both inventories.
 
+## VM Base Layer
+
+- `tasks/bootstrap-vm-base.yml`
+  - installs the evaluated VM package layer from `mickey_vm_apt_packages`
+  - installs the pinned GitHub CLI release from the official `.deb`
+  - installs the pinned Herdr release from GitHub into `/usr/local/bin`
+  - installs the pinned D2 release from GitHub into `/usr/local/bin`
+  - configures the bootstrap admin user and authorized keys
+  - sets the hostname and local `/etc/hosts` mapping
+- `tasks/configure-vm-admin-tooling.yml`
+  - installs the Consul client when the guest is in `consul_client_vms`
+  - installs Codex, PM2, Mermaid CLI, pnpm/Corepack wiring, shared Codex auth wiring, and curated admin dotfiles
+- `group_vars/all.yml`
+  - owns the standard VM package list in `mickey_vm_base_apt_packages`
+- role group vars add only their extra packages, then expose the full evaluated list through `mickey_vm_apt_packages`.
+
 ## Dotfiles
 
 - Curated admin dotfiles are sourced from the sibling `../mickey-dotfiles` repo when it exists on the Ansible controller.
@@ -86,7 +102,8 @@ Run guest playbooks with both inventories.
 - Optional host-only public keys can be tracked in `files/authorized_keys/<inventory_hostname>`.
 - Put one public key per line. Ansible merges that file with the shared `guests.ssh_public_keys` list and removes duplicates before writing `authorized_keys`.
 - Optional per-host SSH client files can be placed in `files/ssh/<inventory_hostname>/`.
-- Only private key files and `config` from that directory are copied to the guest user's `~/.ssh/` directory during `make ansible-build-thud` or `make ansible-build-scarthgap`.
+- Private key files from that directory are copied to the guest user's `~/.ssh/` directory during `make ansible-build-thud` or `make ansible-build-scarthgap`.
+- A `config` file from that directory is installed as `~/.ssh/config.d/mickey-managed.conf`, and `~/.ssh/config` is updated to include `~/.ssh/config.d/*.conf` while preserving VM-local entries.
 - `.pub` files in that directory are treated as local reference material and are not copied to the guest.
 - The `mickey-thud` bundle is intentionally GitHub-only because its managed repos are all hosted there.
 - The repo ignores private key files there by default, but keeps `config` trackable.

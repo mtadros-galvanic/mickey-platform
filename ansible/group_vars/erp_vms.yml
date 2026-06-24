@@ -1,11 +1,7 @@
-mickey_erp_apt_packages:
-  - bubblewrap
-  - ca-certificates
+mickey_erp_extra_apt_packages:
   - cifs-utils
-  - curl
-  - git
-  - qemu-guest-agent
-  - xz-utils
+mickey_erp_apt_packages: "{{ (mickey_vm_base_apt_packages + mickey_erp_extra_apt_packages) | unique }}"
+mickey_vm_apt_packages: "{{ mickey_erp_apt_packages }}"
 
 mickey_erp_share_mount_path: "{{ mickey_shared_mount_path }}"
 mickey_erp_share_name: mickey-share

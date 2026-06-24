@@ -13,6 +13,10 @@ if [[ -d "$HOME/.local/bin" ]]; then
   export PATH="$HOME/.local/bin:$PATH"
 fi
 
+if [[ -f "$HOME/.config/galvanic/github.env" ]]; then
+  source "$HOME/.config/galvanic/github.env"
+fi
+
 autoload -Uz compinit && compinit
 
 if command -v nvim >/dev/null 2>&1; then

@@ -21,6 +21,8 @@ The secrets file is split into three namespaces:
   - the helper scripts and playbooks still accept older role-specific hashes as a fallback during the topology transition
 - `samba`
   - Samba username and password for the `mickey-infra` share
+- `github`
+  - GitHub Packages token for Galvanic npm package access
 
 ## Workflow
 

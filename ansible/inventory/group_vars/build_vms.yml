@@ -1,12 +1,9 @@
-mickey_build_apt_packages:
-  - bubblewrap
-  - ca-certificates
+mickey_build_extra_apt_packages:
   - cifs-utils
-  - curl
-  - git
   - openssh-server
-  - qemu-guest-agent
-  - xz-utils
+mickey_build_apt_packages: "{{ (mickey_vm_base_apt_packages + mickey_build_extra_apt_packages) | unique }}"
+mickey_vm_apt_packages: "{{ mickey_build_apt_packages }}"
+mickey_vm_base_package_install_method: raw
 
 mickey_build_enable_repo_clones: true
 mickey_build_repo_root: "/home/{{ mickey_guest_admin_user }}/Projects"
@@ -22,6 +19,10 @@ mickey_build_fast_share_fstab_options: "{{ mickey_build_share_fstab_options }}"
 mickey_build_share_mount_command: /usr/local/bin/mickey-share-mount
 mickey_build_share_umount_command: /usr/local/bin/mickey-share-umount
 mickey_build_yocto_diagnose_command: /usr/local/bin/mickey-yocto-fetch-diagnose
+mickey_build_yocto_throttle_command: /usr/local/sbin/mickey-throttle-yocto
+mickey_build_yocto_throttle_timer_enabled: false
+mickey_build_yocto_throttle_nice_level: 10
+mickey_build_yocto_throttle_ionice_class: 3
 mickey_build_yocto_target_url: http://downloads.yoctoproject.org/mirror/sources/git2_github.com.intel.linux-intel-lts.git.tar.gz
 mickey_build_yocto_control_url: https://speed.cloudflare.com/__down?bytes=20000000
 mickey_build_git_repos:

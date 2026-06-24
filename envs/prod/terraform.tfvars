@@ -11,7 +11,7 @@ fast_datastore_id       = "local-lvm"
 cloud_init_datastore_id = "local-lvm"
 bulk_datastore_id       = "bulk"
 gateway_ipv4            = "10.25.1.1"
-dns_servers             = ["10.25.1.21", "1.1.1.1"]
+dns_servers             = ["10.25.1.206"]
 search_domain           = "galvanic.local"
 vm_admin_user           = "galvanic"
 cpu_type                = "host"
@@ -46,6 +46,7 @@ vms = {
     memory_balloon_mb   = 8192
     os_disk_gb          = 160
     lan_ipv4_cidr       = "10.25.1.208/24"
+    on_boot             = false
     tags                = ["erp"]
   }
 
@@ -58,10 +59,20 @@ vms = {
     memory_mb            = 16384
     os_disk_gb           = 400
     os_disk_datastore_id = "bulk"
-    lan_ipv4_cidr        = "10.25.1.105/24"
-    started              = false
-    on_boot              = false
-    tags                 = ["build", "yocto", "ubuntu-18"]
+    os_disk_iothread     = true
+    lan_ipv4_cidr        = "10.25.1.199/24"
+    usb_devices = [
+      {
+        host = "14b0:0206"
+        usb3 = true
+      },
+      {
+        host = "1a86:7523"
+      }
+    ]
+    started = false
+    on_boot = false
+    tags    = ["build", "yocto", "ubuntu-18"]
   }
 
   "mickey-scarthgap" = {
@@ -74,6 +85,7 @@ vms = {
     memory_balloon_mb    = 8192
     os_disk_gb           = 500
     os_disk_datastore_id = "bulk"
+    os_disk_iothread     = true
     lan_ipv4_cidr        = "10.25.1.210/24"
     started              = true
     on_boot              = false
@@ -90,6 +102,7 @@ vms = {
     memory_balloon_mb    = 8192
     os_disk_gb           = 500
     os_disk_datastore_id = "bulk"
+    os_disk_iothread     = true
     lan_ipv4_cidr        = "10.25.1.190/24"
     started              = true
     on_boot              = false
@@ -106,7 +119,7 @@ vms = {
     os_disk_gb          = 50
     lan_ipv4_cidr       = "10.25.1.211/24"
     started             = true
-    on_boot             = true
+    on_boot             = false
     tags                = ["ubuntu-26"]
   }
 
@@ -114,13 +127,13 @@ vms = {
     clone_template_name = "ubuntu-26-04-server-cloudinit"
     role                = "utility"
     vm_id               = 707
-    cpu_cores           = 4
-    memory_mb           = 8192
+    cpu_cores           = 6
+    memory_mb           = 16384
     memory_balloon_mb   = 2048
     os_disk_gb          = 50
     lan_ipv4_cidr       = "10.25.1.212/24"
     started             = true
-    on_boot             = true
+    on_boot             = false
     tags                = ["ubuntu-26"]
   }
 

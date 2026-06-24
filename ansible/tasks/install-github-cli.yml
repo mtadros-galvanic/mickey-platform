@@ -1,0 +1,31 @@
+---
+- name: Ensure GitHub CLI is installed at the pinned version
+  ansible.builtin.raw: |
+    set -eu
+    target_version={{ mickey_gh_version | quote }}
+    current_version="$(gh --version 2>/dev/null | awk 'NR == 1 { print $3 }' | sed 's/^v//' || true)"
+
+    if [ "$current_version" = "$target_version" ]; then
+      exit 0
+    fi
+
+    machine="$(uname -m)"
+    case "$machine" in
+      x86_64|amd64) release_arch={{ mickey_gh_release_arch_map['x86_64'] | quote }} ;;
+      aarch64|arm64) release_arch={{ mickey_gh_release_arch_map['aarch64'] | quote }} ;;
+      *) echo "unsupported GitHub CLI architecture: $machine" >&2; exit 1 ;;
+    esac
+
+    export DEBIAN_FRONTEND=noninteractive
+    tmp="$(mktemp --suffix=.deb)"
+    trap 'rm -f "$tmp"' EXIT
+    curl -fsSL --retry 3 --connect-timeout 10 --max-time 120 \
+      {{ mickey_gh_release_base_url | quote }}/gh_"$target_version"_linux_"$release_arch".deb \
+      -o "$tmp"
+    apt-get -o Acquire::ForceIPv4=true install -y "$tmp"
+
+    gh --version >/dev/null
+    echo changed
+  register: mickey_gh_install_result
+  changed_when: "'changed' in mickey_gh_install_result.stdout"
+  when: mickey_gh_enable | default(false) | bool

@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Mickey Codex updater daily at midnight
+
+[Timer]
+OnCalendar=*-*-* 00:00:00
+Persistent=true
+Unit=mickey-codex-update-everywhere.service
+
+[Install]
+WantedBy=timers.target

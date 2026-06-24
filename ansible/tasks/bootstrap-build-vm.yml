@@ -87,40 +87,20 @@
   when: (mickey_guest_ssh_bundle_paths | length) > 0
   no_log: true
 
-- name: Install build VM baseline packages
-  ansible.builtin.raw: |
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get update
-    apt-get install -y {{ mickey_build_apt_packages | join(' ') }}
+- name: Select the managed SSH client config fragment payload
+  ansible.builtin.set_fact:
+    mickey_guest_ssh_config_fragment_content: "{{ (mickey_guest_ssh_bundle_files | selectattr('name', 'equalto', 'config') | map(attribute='content') | list | last) | default('') }}"
+  no_log: true
 
-- name: Ensure the bootstrap user has the configured password
-  ansible.builtin.raw: |
-    usermod --password {{ (guests.admin_password_hash | default(guests.extra_vm_admin_password_hash | default(''))) | quote }} {{ mickey_guest_admin_user | quote }}
-  when:
-    - guests is defined
-    - >-
-        (
-          guests.admin_password_hash is defined
-          and (guests.admin_password_hash | length) > 0
-        )
-        or
-        (
-          guests.extra_vm_admin_password_hash is defined
-          and (guests.extra_vm_admin_password_hash | length) > 0
-        )
+- name: Apply the shared VM base layer to the build guest
+  ansible.builtin.include_tasks: ../tasks/bootstrap-vm-base.yml
 
-- name: Ensure the bootstrap user's authorized_keys matches the configured key set
-  ansible.builtin.raw: |
-    install -d -m 0700 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} /home/{{ mickey_guest_admin_user }}/.ssh
-    cat > /home/{{ mickey_guest_admin_user }}/.ssh/authorized_keys <<'EOF'
-    {% for ssh_key in mickey_guest_authorized_keys %}
-    {{ ssh_key }}
-    {% endfor %}
-    EOF
-    chown {{ mickey_guest_admin_user | quote }}:{{ mickey_guest_admin_user | quote }} /home/{{ mickey_guest_admin_user }}/.ssh/authorized_keys
-    chmod 0600 /home/{{ mickey_guest_admin_user }}/.ssh/authorized_keys
-  when:
-    - (mickey_guest_authorized_keys | length) > 0
+- name: Ensure the build guest has the managed Mickey SSH config fragment
+  ansible.builtin.include_tasks: ../tasks/configure-ssh-client-managed-fragment.yml
+  vars:
+    mickey_ssh_client_managed_fragment_content: "{{ mickey_guest_ssh_config_fragment_content }}"
+  when: mickey_guest_ssh_config_fragment_content | length > 0
+  no_log: true
 
 - name: Ensure optional SSH bundle files are present for the bootstrap user
   ansible.builtin.raw: |
@@ -131,7 +111,9 @@
     chown {{ mickey_guest_admin_user | quote }}:{{ mickey_guest_admin_user | quote }} /home/{{ mickey_guest_admin_user }}/.ssh/{{ item.name | quote }}
     chmod 0600 /home/{{ mickey_guest_admin_user }}/.ssh/{{ item.name | quote }}
   loop: "{{ mickey_guest_ssh_bundle_files }}"
-  when: (mickey_guest_ssh_bundle_files | length) > 0
+  when:
+    - (mickey_guest_ssh_bundle_files | length) > 0
+    - item.name != "config"
   no_log: true
 
 - name: Remove public key reference files from the bootstrap user's SSH bundle
@@ -287,17 +269,8 @@
     mount "$mount_point"
   changed_when: false
 
-- name: Install the Consul client baseline for build guests
-  ansible.builtin.include_tasks: ../tasks/install-consul-client.yml
-
-- name: Install Codex tooling for build guests
-  ansible.builtin.include_tasks: ../tasks/install-codex-cli.yml
-
-- name: Point build guests at the shared Codex auth file when present
-  ansible.builtin.include_tasks: ../tasks/configure-codex-auth.yml
-
-- name: Install the curated admin dotfiles on build guests
-  ansible.builtin.include_tasks: ../tasks/configure-admin-dotfiles.yml
+- name: Apply the shared VM admin tooling layer to the build guest
+  ansible.builtin.include_tasks: ../tasks/configure-vm-admin-tooling.yml
 
 - name: Install the Yocto fetch diagnosis helper
   ansible.builtin.raw: |
@@ -357,6 +330,83 @@
     EOF
     chown root:root {{ mickey_build_yocto_diagnose_command | quote }}
     chmod 0755 {{ mickey_build_yocto_diagnose_command | quote }}
+
+- name: Install the Yocto build throttle helper
+  ansible.builtin.raw: |
+    install -d -m 0755 /usr/local/sbin
+    cat > {{ mickey_build_yocto_throttle_command | quote }} <<'EOF'
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    nice_level="${MICKEY_YOCTO_NICE_LEVEL:-{{ mickey_build_yocto_throttle_nice_level }}}"
+    ionice_class="${MICKEY_YOCTO_IONICE_CLASS:-{{ mickey_build_yocto_throttle_ionice_class }}}"
+    self="$$"
+
+    mapfile -t pids < <(
+      ps -eo pid=,args= |
+        awk -v self="$self" '
+          $1 == self { next }
+          /mickey-throttle-yocto/ { next }
+          /\/home\/[^ ]+\/yocto\// { print $1; next }
+          /\/yocto\/.*\/bitbake/ { print $1; next }
+          /bitbake-(server|worker)|\/bitbake / { print $1; next }
+          /\/tmp\/work\/.*(mkfs\.ext4|tar|pseudo)/ { print $1; next }
+        ' |
+        sort -n -u
+    )
+
+    throttled=0
+    for pid in "${pids[@]}"; do
+      if [[ ! -d "/proc/$pid" ]]; then
+        continue
+      fi
+
+      renice -n "$nice_level" -p "$pid" >/dev/null 2>&1 || true
+      ionice -c "$ionice_class" -p "$pid" >/dev/null 2>&1 || true
+      throttled=$((throttled + 1))
+    done
+
+    echo "throttled ${throttled} Yocto build processes"
+    EOF
+    chown root:root {{ mickey_build_yocto_throttle_command | quote }}
+    chmod 0755 {{ mickey_build_yocto_throttle_command | quote }}
+
+- name: Install the Yocto build throttle systemd units
+  ansible.builtin.raw: |
+    cat > /etc/systemd/system/mickey-throttle-yocto.service <<EOF
+    [Unit]
+    Description=Lower priority for active Mickey Yocto build processes
+
+    [Service]
+    Type=oneshot
+    ExecStart={{ mickey_build_yocto_throttle_command }}
+    EOF
+
+    cat > /etc/systemd/system/mickey-throttle-yocto.timer <<'EOF'
+    [Unit]
+    Description=Periodically lower priority for active Mickey Yocto build processes
+
+    [Timer]
+    OnBootSec=2min
+    OnUnitActiveSec=1min
+    AccuracySec=10s
+    Unit=mickey-throttle-yocto.service
+
+    [Install]
+    WantedBy=timers.target
+    EOF
+
+    systemctl daemon-reload
+
+- name: Configure the Yocto build throttle timer
+  ansible.builtin.raw: |
+    set -eu
+    if [ "{{ mickey_build_yocto_throttle_timer_enabled | bool | ternary('true', 'false') }}" = "true" ]; then
+      systemctl enable --now mickey-throttle-yocto.timer
+      {{ mickey_build_yocto_throttle_command | quote }} || true
+    else
+      systemctl disable --now mickey-throttle-yocto.timer >/dev/null 2>&1 || true
+    fi
 
 - name: Ensure required build repos are available
   ansible.builtin.raw: |

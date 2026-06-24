@@ -1,0 +1,11 @@
+[Unit]
+Description=Update Codex CLI across Mickey Linux hosts
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=galvanic
+WorkingDirectory=/home/galvanic/Projects/mickey/mickey-platform
+Environment=PATH=/home/galvanic/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/galvanic/Projects/mickey/mickey-platform/scripts/update-codex-everywhere.sh

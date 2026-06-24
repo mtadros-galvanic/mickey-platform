@@ -23,6 +23,8 @@
       mode: "0755"
     - path: "{{ mickey_guest_admin_home }}/.local/lib"
       mode: "0755"
+    - path: "{{ mickey_codex_standalone_bin_dir }}"
+      mode: "0755"
     - path: "{{ mickey_codex_local_state_root }}"
       mode: "0700"
     - path: "{{ mickey_codex_local_tmp_path }}"
@@ -194,9 +196,11 @@
       "{{ mickey_codex_node_install_dir }}/bin/node|{{ mickey_codex_local_bin_dir }}/node" \
       "{{ mickey_codex_node_install_dir }}/bin/npm|{{ mickey_codex_local_bin_dir }}/npm" \
       "{{ mickey_codex_node_install_dir }}/bin/npx|{{ mickey_codex_local_bin_dir }}/npx" \
+      "{{ mickey_codex_node_install_dir }}/bin/corepack|{{ mickey_codex_local_bin_dir }}/corepack" \
       "{{ mickey_codex_local_bin_dir }}/node|/usr/local/bin/node" \
       "{{ mickey_codex_local_bin_dir }}/npm|/usr/local/bin/npm" \
-      "{{ mickey_codex_local_bin_dir }}/npx|/usr/local/bin/npx"
+      "{{ mickey_codex_local_bin_dir }}/npx|/usr/local/bin/npx" \
+      "{{ mickey_codex_local_bin_dir }}/corepack|/usr/local/bin/corepack"
     do
       src="${pair%%|*}"
       dst="${pair##*|}"
@@ -212,31 +216,384 @@
   changed_when: "'changed' in mickey_codex_node_result.stdout"
   when: mickey_codex_enable | default(false) | bool
 
-- name: Install Codex CLI for the guest user
+- name: Install the pinned PM2 process manager
   ansible.builtin.raw: |
     set -eu
     changed=0
+    pm2_version={{ mickey_pm2_version | quote }}
+    pm2_package_json={{ (mickey_codex_node_install_dir ~ '/lib/node_modules/pm2/package.json') | quote }}
+    npm_bin={{ (mickey_codex_local_bin_dir ~ '/npm') | quote }}
+    node_bin={{ (mickey_codex_local_bin_dir ~ '/node') | quote }}
+    current_version="$("$node_bin" -e "try { console.log(require('$pm2_package_json').version) } catch (_) {}" 2>/dev/null || true)"
 
-    package={{ mickey_codex_package | quote }}
+    if [ "$current_version" != "$pm2_version" ]; then
+      if [ {{ mickey_guest_admin_user | quote }} = root ]; then
+        env \
+          HOME={{ mickey_guest_admin_home | quote }} \
+          PATH={{ mickey_codex_local_bin_dir | quote }}:/usr/local/bin:/usr/bin:/bin \
+          "$npm_bin" install --global --no-audit --no-fund "pm2@$pm2_version"
+      else
+        sudo -H -u {{ mickey_guest_admin_user | quote }} env \
+          PATH={{ mickey_codex_local_bin_dir | quote }}:/usr/local/bin:/usr/bin:/bin \
+          "$npm_bin" install --global --no-audit --no-fund "pm2@$pm2_version"
+      fi
+      changed=1
+    fi
+
+    for cmd in {{ mickey_pm2_commands | join(' ') }}; do
+      src={{ mickey_codex_node_install_dir | quote }}/bin/"$cmd"
+      [ -e "$src" ] || continue
+      for dst in {{ mickey_codex_local_bin_dir | quote }}/"$cmd" /usr/local/bin/"$cmd"; do
+        if [ "$(readlink "$dst" 2>/dev/null || true)" != "$src" ]; then
+          ln -sfn "$src" "$dst"
+          changed=1
+        fi
+      done
+    done
+
+    if [ "$changed" -eq 1 ]; then
+      echo changed
+    fi
+  register: mickey_pm2_result
+  changed_when: "'changed' in mickey_pm2_result.stdout"
+  when:
+    - mickey_codex_enable | default(false) | bool
+    - mickey_pm2_enable | default(false) | bool
+
+- name: Install Mermaid CLI browser runtime packages
+  ansible.builtin.raw: |
+    set -eu
+    export DEBIAN_FRONTEND=noninteractive
+    packages=""
+
+    has_install_candidate() {
+      apt-cache policy "$1" 2>/dev/null | awk '/Candidate:/ { exit ($2 == "(none)") ? 1 : 0 } END { if (NR == 0) exit 1 }'
+    }
+
+    for choice in {{ mickey_mermaid_cli_browser_apt_package_choices | map('quote') | join(' ') }}; do
+      selected=""
+      for candidate in $(printf '%s\n' "$choice" | tr '|' ' '); do
+        if has_install_candidate "$candidate"; then
+          selected="$candidate"
+          break
+        fi
+      done
+
+      if [ -z "$selected" ]; then
+        echo "no available package found for Mermaid CLI browser dependency choice: $choice" >&2
+        exit 1
+      fi
+
+      if ! dpkg-query -W -f='${Status}' "$selected" 2>/dev/null | grep -q 'install ok installed'; then
+        packages="$packages $selected"
+      fi
+    done
+
+    if [ -n "$packages" ]; then
+      apt-get -o Acquire::ForceIPv4=true update
+      apt-get -o Acquire::ForceIPv4=true install -y --no-install-recommends $packages
+      echo changed
+    fi
+  register: mickey_mermaid_cli_browser_packages_result
+  changed_when: "'changed' in mickey_mermaid_cli_browser_packages_result.stdout"
+  when:
+    - mickey_codex_enable | default(false) | bool
+    - mickey_mermaid_cli_enable | default(false) | bool
+
+- name: Install the pinned Mermaid CLI renderer
+  ansible.builtin.raw: |
+    set -eu
+    changed=0
+    mermaid_package={{ mickey_mermaid_cli_package | quote }}
+    mermaid_version={{ mickey_mermaid_cli_version | quote }}
+    mermaid_package_json={{ (mickey_codex_node_install_dir ~ '/lib/node_modules/@mermaid-js/mermaid-cli/package.json') | quote }}
+    npm_bin={{ (mickey_codex_local_bin_dir ~ '/npm') | quote }}
+    node_bin={{ (mickey_codex_local_bin_dir ~ '/node') | quote }}
+    current_version="$("$node_bin" -e "try { console.log(require('$mermaid_package_json').version) } catch (_) {}" 2>/dev/null || true)"
+
+    if [ "$current_version" != "$mermaid_version" ]; then
+      if [ {{ mickey_guest_admin_user | quote }} = root ]; then
+        env \
+          HOME={{ mickey_guest_admin_home | quote }} \
+          PATH={{ mickey_codex_local_bin_dir | quote }}:/usr/local/bin:/usr/bin:/bin \
+          PUPPETEER_CACHE_DIR={{ (mickey_guest_admin_home ~ '/.cache/puppeteer') | quote }} \
+          "$npm_bin" install --global --no-audit --no-fund "$mermaid_package@$mermaid_version"
+      else
+        sudo -H -u {{ mickey_guest_admin_user | quote }} env \
+          PATH={{ mickey_codex_local_bin_dir | quote }}:/usr/local/bin:/usr/bin:/bin \
+          PUPPETEER_CACHE_DIR={{ (mickey_guest_admin_home ~ '/.cache/puppeteer') | quote }} \
+          "$npm_bin" install --global --no-audit --no-fund "$mermaid_package@$mermaid_version"
+      fi
+      changed=1
+    fi
+
+    for cmd in {{ mickey_mermaid_cli_commands | join(' ') }}; do
+      src={{ mickey_codex_node_install_dir | quote }}/bin/"$cmd"
+      [ -e "$src" ] || continue
+      for dst in {{ mickey_codex_local_bin_dir | quote }}/"$cmd" /usr/local/bin/"$cmd"; do
+        if [ "$(readlink "$dst" 2>/dev/null || true)" != "$src" ]; then
+          ln -sfn "$src" "$dst"
+          changed=1
+        fi
+      done
+    done
+
+    {{ (mickey_codex_local_bin_dir ~ '/mmdc') | quote }} --version >/dev/null
+
+    if [ "$changed" -eq 1 ]; then
+      echo changed
+    fi
+  register: mickey_mermaid_cli_result
+  changed_when: "'changed' in mickey_mermaid_cli_result.stdout"
+  when:
+    - mickey_codex_enable | default(false) | bool
+    - mickey_mermaid_cli_enable | default(false) | bool
+
+- name: Install the pnpm package manager
+  ansible.builtin.raw: |
+    set -eu
+    changed=0
+    corepack={{ (mickey_codex_local_bin_dir ~ '/corepack') | quote }}
+    pnpm_version={{ mickey_pnpm_version | quote }}
+    use_corepack_shims={{ (mickey_pnpm_use_corepack_shims | default(true) | bool) | ternary('1', '0') }}
+    current_version="$(COREPACK_ENABLE_DOWNLOAD_PROMPT=0 timeout 20s {{ (mickey_codex_local_bin_dir ~ '/pnpm') | quote }} --version 2>/dev/null || true)"
+
+    if [ "$current_version" != "$pnpm_version" ]; then
+      if [ {{ mickey_guest_admin_user | quote }} = root ]; then
+        if [ "$use_corepack_shims" = 1 ]; then
+          COREPACK_ENABLE_DOWNLOAD_PROMPT=0 timeout 120s "$corepack" install -g "pnpm@$pnpm_version"
+        else
+          if ! COREPACK_HOME={{ (mickey_guest_admin_home ~ '/.local/state/corepack') | quote }} \
+            COREPACK_DEFAULT_TO_LATEST=0 \
+            COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
+            timeout 120s "$corepack" install -g "pnpm@$pnpm_version"; then
+            COREPACK_HOME={{ (mickey_guest_admin_home ~ '/.local/state/corepack') | quote }} \
+              COREPACK_DEFAULT_TO_LATEST=0 \
+              COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
+              timeout 120s "$corepack" prepare "pnpm@$pnpm_version" --activate
+          fi
+        fi
+        COREPACK_HOME={{ (mickey_guest_admin_home ~ '/.local/state/corepack') | quote }} \
+          COREPACK_DEFAULT_TO_LATEST=0 \
+          COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
+          timeout 60s "$corepack" enable --install-directory {{ mickey_codex_local_bin_dir | quote }} || true
+      else
+        if [ "$use_corepack_shims" = 1 ]; then
+          sudo -H -u {{ mickey_guest_admin_user | quote }} env \
+            COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
+            timeout 120s "$corepack" install -g "pnpm@$pnpm_version"
+        else
+          if ! sudo -H -u {{ mickey_guest_admin_user | quote }} env \
+            COREPACK_HOME={{ (mickey_guest_admin_home ~ '/.local/state/corepack') | quote }} \
+            COREPACK_DEFAULT_TO_LATEST=0 \
+            COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
+            timeout 120s "$corepack" install -g "pnpm@$pnpm_version"; then
+            sudo -H -u {{ mickey_guest_admin_user | quote }} env \
+              COREPACK_HOME={{ (mickey_guest_admin_home ~ '/.local/state/corepack') | quote }} \
+              COREPACK_DEFAULT_TO_LATEST=0 \
+              COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
+              timeout 120s "$corepack" prepare "pnpm@$pnpm_version" --activate
+          fi
+        fi
+        sudo -H -u {{ mickey_guest_admin_user | quote }} env \
+          COREPACK_HOME={{ (mickey_guest_admin_home ~ '/.local/state/corepack') | quote }} \
+          COREPACK_DEFAULT_TO_LATEST=0 \
+          COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
+          timeout 60s "$corepack" enable --install-directory {{ mickey_codex_local_bin_dir | quote }} || true
+      fi
+      changed=1
+    fi
+
+    node_bin={{ (mickey_codex_local_bin_dir ~ '/node') | quote }}
+
+    if [ "$use_corepack_shims" = 1 ]; then
+      rm -f {{ (mickey_codex_local_bin_dir ~ '/pnpm') | quote }} {{ (mickey_codex_local_bin_dir ~ '/pnpx') | quote }}
+      if [ {{ mickey_guest_admin_user | quote }} = root ]; then
+        COREPACK_ENABLE_DOWNLOAD_PROMPT=0 timeout 60s "$corepack" enable --install-directory {{ mickey_codex_local_bin_dir | quote }}
+      else
+        sudo -H -u {{ mickey_guest_admin_user | quote }} env \
+          COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
+          timeout 60s "$corepack" enable --install-directory {{ mickey_codex_local_bin_dir | quote }}
+      fi
+
+      for pair in \
+        "{{ mickey_codex_local_bin_dir }}/pnpm|/usr/local/bin/pnpm" \
+        "{{ mickey_codex_local_bin_dir }}/pnpx|/usr/local/bin/pnpx"
+      do
+        src="${pair%%|*}"
+        dst="${pair##*|}"
+        if [ "$(readlink "$dst" 2>/dev/null || true)" != "$src" ]; then
+          ln -sfn "$src" "$dst"
+          changed=1
+        fi
+      done
+    else
+      pnpm_package_dir={{ (mickey_guest_admin_home ~ '/.local/state/corepack/v1/pnpm') | quote }}/"$pnpm_version"
+      if [ ! -f "$pnpm_package_dir/bin/pnpm.cjs" ]; then
+        pnpm_package_dir={{ (mickey_guest_admin_home ~ '/.local/state/corepack/pnpm') | quote }}/"$pnpm_version"
+      fi
+
+      for pair in \
+        "$pnpm_package_dir/bin/pnpm.cjs|{{ mickey_codex_local_bin_dir }}/pnpm" \
+        "$pnpm_package_dir/bin/pnpm.cjs|/usr/local/bin/pnpm" \
+        "$pnpm_package_dir/bin/pnpx.cjs|{{ mickey_codex_local_bin_dir }}/pnpx" \
+        "$pnpm_package_dir/bin/pnpx.cjs|/usr/local/bin/pnpx"
+      do
+        src="${pair%%|*}"
+        dst="${pair##*|}"
+        tmp="$(mktemp)"
+        printf '%s\n' \
+          '#!/bin/sh' \
+          "exec $node_bin $src \"\$@\"" \
+          > "$tmp"
+        if [ ! -f "$dst" ] || ! cmp -s "$tmp" "$dst"; then
+          case "$dst" in
+            {{ mickey_codex_local_bin_dir | quote }}/*)
+              install -D -m 0755 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} "$tmp" "$dst"
+              ;;
+            *)
+              install -D -m 0755 -o root -g root "$tmp" "$dst"
+              ;;
+          esac
+          changed=1
+        fi
+        rm -f "$tmp"
+      done
+    fi
+
+    if [ "$changed" -eq 1 ]; then
+      echo changed
+    fi
+  register: mickey_pnpm_result
+  changed_when: "'changed' in mickey_pnpm_result.stdout"
+  when:
+    - mickey_codex_enable | default(false) | bool
+    - mickey_pnpm_enable | default(false) | bool
+
+- name: Point pnpm at the host-specific fast shared store
+  ansible.builtin.raw: |
+    set -eu
+    changed=0
+    store_dir={{ mickey_pnpm_store_dir | quote }}
+    pnpm_bin={{ (mickey_codex_local_bin_dir ~ '/pnpm') | quote }}
+    npmrc={{ (mickey_guest_admin_home ~ '/.npmrc') | quote }}
+    tmp_npmrc="$(mktemp)"
+    trap 'rm -f "$tmp_npmrc"' EXIT
+
+    run_pnpm() {
+      if [ {{ mickey_guest_admin_user | quote }} = root ]; then
+        env \
+          HOME={{ mickey_guest_admin_home | quote }} \
+          PATH={{ mickey_codex_local_bin_dir | quote }}:/usr/local/bin:/usr/bin:/bin \
+          COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
+          timeout 30s "$pnpm_bin" "$@"
+      else
+        sudo -H -u {{ mickey_guest_admin_user | quote }} env \
+          PATH={{ mickey_codex_local_bin_dir | quote }}:/usr/local/bin:/usr/bin:/bin \
+          COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
+          timeout 30s "$pnpm_bin" "$@"
+      fi
+    }
+
+    mkdir -p "$store_dir"
+    chown {{ mickey_guest_admin_user | quote }}:{{ mickey_guest_admin_user | quote }} "$store_dir" 2>/dev/null || true
+    chmod 0775 "$store_dir" 2>/dev/null || true
+
+    if [ -f "$npmrc" ]; then
+      grep -v '^store-dir=' "$npmrc" > "$tmp_npmrc" || true
+      if ! cmp -s "$tmp_npmrc" "$npmrc"; then
+        if [ -s "$tmp_npmrc" ]; then
+          install -D -m 0644 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} "$tmp_npmrc" "$npmrc"
+        else
+          rm -f "$npmrc"
+        fi
+        changed=1
+      fi
+    fi
+
+    current_store="$(run_pnpm config get store-dir 2>/dev/null || true)"
+    if [ "$current_store" != "$store_dir" ]; then
+      run_pnpm config set store-dir "$store_dir" --location user
+      changed=1
+    fi
+
+    verified_store="$(run_pnpm config get store-dir 2>/dev/null || true)"
+    if [ "$verified_store" != "$store_dir" ]; then
+      echo "pnpm store-dir did not apply; expected $store_dir, got $verified_store" >&2
+      exit 1
+    fi
+
+    if [ "$changed" -eq 1 ]; then
+      echo changed
+    fi
+  register: mickey_pnpm_store_result
+  changed_when: "'changed' in mickey_pnpm_store_result.stdout"
+  when:
+    - mickey_codex_enable | default(false) | bool
+    - mickey_pnpm_enable | default(false) | bool
+
+- name: Install Codex CLI for the guest user
+  ansible.builtin.raw: |
+    set -eu
+    resolve_codex_bin() {
+      for candidate in \
+        {{ mickey_codex_standalone_bin_path | quote }} \
+        {{ (mickey_codex_local_home ~ '/packages/standalone/current/bin/codex') | quote }} \
+        {{ (mickey_codex_local_home ~ '/packages/standalone/current/codex') | quote }}; do
+        if [ -x "$candidate" ] && "$candidate" --version >/dev/null 2>&1; then
+          printf '%s\n' "$candidate"
+          return 0
+        fi
+      done
+      return 1
+    }
+
+    before_path="$(resolve_codex_bin 2>/dev/null || true)"
+    before=""
+    if [ -n "$before_path" ]; then
+      before="$("$before_path" --version 2>/dev/null || true)"
+    fi
+    release_arg=""
     requested_version={{ mickey_codex_version | default('') | quote }}
     if [ -n "$requested_version" ]; then
-      package="$package@$requested_version"
+      release_arg="--release $requested_version"
     fi
 
-    current_version="$({{ mickey_codex_npm_bin_path }} --version 2>/dev/null | awk 'NR==1 {print $2}' || true)"
-    if [ -n "$requested_version" ] && [ "$current_version" != "$requested_version" ]; then
-      su - {{ mickey_guest_admin_user }} -c "PATH=/usr/local/bin:/usr/bin:/bin npm install --no-audit --no-fund -g $package"
-      changed=1
-    elif [ -z "$current_version" ]; then
-      su - {{ mickey_guest_admin_user }} -c "PATH=/usr/local/bin:/usr/bin:/bin npm install --no-audit --no-fund -g $package"
-      changed=1
+    installer="$(mktemp)"
+    trap 'rm -f "$installer"' EXIT
+    curl -fsSL {{ mickey_codex_install_script_url | quote }} -o "$installer"
+    chmod 0755 "$installer"
+    if [ {{ mickey_guest_admin_user | quote }} = root ]; then
+      env \
+        CODEX_HOME={{ mickey_codex_local_home | quote }} \
+        CODEX_INSTALL_DIR={{ mickey_codex_standalone_bin_dir | quote }} \
+        CODEX_NON_INTERACTIVE=true \
+        PATH={{ mickey_codex_standalone_bin_dir | quote }}:/usr/local/bin:/usr/bin:/bin \
+        setsid sh "$installer" $release_arg </dev/null
+    else
+      sudo -H -u {{ mickey_guest_admin_user | quote }} env \
+        CODEX_HOME={{ mickey_codex_local_home | quote }} \
+        CODEX_INSTALL_DIR={{ mickey_codex_standalone_bin_dir | quote }} \
+        CODEX_NON_INTERACTIVE=true \
+        PATH={{ mickey_codex_standalone_bin_dir | quote }}:/usr/local/bin:/usr/bin:/bin \
+        setsid sh "$installer" $release_arg </dev/null
     fi
 
-    if [ "$(readlink {{ mickey_codex_real_bin_path | quote }} 2>/dev/null || true)" != "{{ mickey_codex_npm_bin_path }}" ]; then
-      ln -sfn {{ mickey_codex_npm_bin_path }} {{ mickey_codex_real_bin_path }}
-      changed=1
+    after_path="$(resolve_codex_bin 2>/dev/null || true)"
+    after=""
+    if [ -n "$after_path" ]; then
+      after="$("$after_path" --version 2>/dev/null || true)"
     fi
-    if [ "$changed" -eq 1 ]; then
+    if [ -z "$after" ]; then
+      echo "Codex installer did not produce a working standalone binary under {{ mickey_codex_standalone_bin_dir }} or {{ mickey_codex_local_home }}/packages/standalone/current" >&2
+      exit 1
+    fi
+
+    if [ "$(readlink {{ mickey_codex_real_bin_path | quote }} 2>/dev/null || true)" != "$after_path" ]; then
+      ln -sfn "$after_path" {{ mickey_codex_real_bin_path | quote }}
+      chown -h {{ mickey_guest_admin_user | quote }}:{{ mickey_guest_admin_user | quote }} {{ mickey_codex_real_bin_path | quote }} || true
+      echo changed
+    elif [ "$before" != "$after" ]; then
       echo changed
     fi
   register: mickey_codex_cli_result
@@ -251,7 +608,15 @@
     #!/bin/sh
     set -eu
 
-    npm install --no-audit --no-fund -g {{ mickey_codex_package | quote }}@latest
+    installer="$(mktemp)"
+    trap 'rm -f "$installer"' EXIT
+    curl -fsSL {{ mickey_codex_install_script_url | quote }} -o "$installer"
+    chmod 0755 "$installer"
+    export CODEX_HOME={{ mickey_codex_local_home | quote }}
+    export CODEX_INSTALL_DIR={{ mickey_codex_standalone_bin_dir | quote }}
+    export CODEX_NON_INTERACTIVE=true
+    export PATH={{ mickey_codex_standalone_bin_dir | quote }}:/usr/local/bin:/usr/bin:/bin
+    setsid sh "$installer" </dev/null
     codex --version
     EOF
 

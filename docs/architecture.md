@@ -30,7 +30,7 @@ It deliberately does not deploy the main runtime stack. The primary runtime stac
 - Ubuntu 24.04 server guest
 - reserved for future ERP-specific workloads
 - receives a host-level Consul client from `mickey-platform`
-- defined in repo docs and template planning before it is added to the active prod Terraform inputs
+- included in the active prod Terraform inputs
 
 ### Legacy build VM
 
@@ -52,6 +52,25 @@ It deliberately does not deploy the main runtime stack. The primary runtime stac
 - receives a host-level Consul client from `mickey-platform`
 - is intentionally treated as mutually exclusive with `mickey-thud` for capacity planning
 
+### Brimstone build VM
+
+- Ubuntu 22.04 guest for Brimstone-specific build work
+- named `mickey-brimstone`
+- sized like `mickey-scarthgap`: `4 vCPU`, `20 GiB` RAM with ballooning, `500 GiB` disk
+- keeps its main disk on `bulk`
+- receives a host-level Consul client from `mickey-platform`
+- syncs only the `brimestone` and `Protech` project trees during bootstrap
+
+### Utility VMs
+
+- Ubuntu 26.04 server guests
+- named `mickey-at4`, `mickey-tmp`, and `mickey-controller`
+- receive the utility baseline instead of the app-facing Consul client baseline
+- mount `mickey-infra`'s Samba share at `/mnt/mickey-share`
+- mount the fast shared workspace path when configured
+- install the pinned Node 24 Codex toolchain and managed admin dotfiles
+- `mickey-controller` can receive a synced copy of the controller's local `~/Projects/mickey` tree
+
 ### Legacy Windows ISE VM
 
 - imported from an existing VMware Windows 7 source tree instead of a cloud-init template
@@ -67,6 +86,7 @@ It deliberately does not deploy the main runtime stack. The primary runtime stac
 - HDD: one ext4-backed Proxmox directory datastore named `bulk`
 - `mickey-infra` receives the existing `2 TiB` share disk during the manual cutover
 - `mickey-thud` keeps its `400 GiB` disk on `bulk`
+- `mickey-scarthgap` and `mickey-brimstone` keep their `500 GiB` build disks on `bulk`
 - `mickey-ise7` imports its legacy Windows disk onto `bulk`
 - remaining `bulk` capacity stays available for backups, ISOs, templates, and future VM disks
 

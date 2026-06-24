@@ -1,0 +1,20 @@
+---
+- name: Install the Consul client baseline for the VM
+  ansible.builtin.include_tasks: ../tasks/install-consul-client.yml
+  when: mickey_vm_base_configure_consul | bool
+
+- name: Install Codex tooling for the VM
+  ansible.builtin.include_tasks: ../tasks/install-codex-cli.yml
+  when: mickey_vm_base_configure_codex | bool
+
+- name: Point the VM at the shared Codex auth file when present
+  ansible.builtin.include_tasks: ../tasks/configure-codex-auth.yml
+  when: mickey_vm_base_configure_codex_auth | bool
+
+- name: Install the curated admin dotfiles on the VM
+  ansible.builtin.include_tasks: ../tasks/configure-admin-dotfiles.yml
+  when: mickey_vm_base_configure_dotfiles | bool
+
+- name: Configure Galvanic GitHub Packages auth for the VM admin user
+  ansible.builtin.include_tasks: ../tasks/configure-github-packages-auth.yml
+  when: mickey_github_packages_auth_enable | default(false) | bool

@@ -8,6 +8,8 @@
     mickey_consul_data_dir_effective: "{{ mickey_consul_data_dir | default('/var/lib/consul') }}"
     mickey_consul_keyring_path_effective: "{{ mickey_consul_keyring_path | default('/usr/share/keyrings/hashicorp-archive-keyring.gpg') }}"
     mickey_consul_repo_file_effective: "{{ mickey_consul_repo_file | default('/etc/apt/sources.list.d/hashicorp.list') }}"
+    mickey_consul_install_method_effective: "{{ mickey_consul_install_method | default('apt') }}"
+    mickey_consul_version_effective: "{{ mickey_consul_version | default('2.0.0') }}"
 
 - name: Ensure Consul client prerequisites are installed
   ansible.builtin.raw: |
@@ -21,8 +23,8 @@
 
     if [ -n "$missing_packages" ]; then
       export DEBIAN_FRONTEND=noninteractive
-      apt-get update
-      apt-get install -y $missing_packages
+      apt-get -o Acquire::ForceIPv4=true update
+      apt-get -o Acquire::ForceIPv4=true install -y $missing_packages
       echo changed
     fi
   register: mickey_consul_prereq_result
@@ -45,6 +47,7 @@
     echo changed
   register: mickey_consul_keyring_result
   changed_when: "'changed' in mickey_consul_keyring_result.stdout"
+  when: mickey_consul_install_method_effective == 'apt'
 
 - name: Install the HashiCorp apt repository
   ansible.builtin.raw: |
@@ -65,10 +68,11 @@
 
     printf '%s\n' "$repo" > {{ mickey_consul_repo_file_effective | quote }}
     export DEBIAN_FRONTEND=noninteractive
-    apt-get update
+    apt-get -o Acquire::ForceIPv4=true update
     echo changed
   register: mickey_consul_repo_result
   changed_when: "'changed' in mickey_consul_repo_result.stdout"
+  when: mickey_consul_install_method_effective == 'apt'
 
 - name: Install the Consul package
   ansible.builtin.raw: |
@@ -78,11 +82,116 @@
     fi
 
     export DEBIAN_FRONTEND=noninteractive
-    apt-get update
-    apt-get install -y consul
+    apt-get -o Acquire::ForceIPv4=true update
+    apt-get -o Acquire::ForceIPv4=true install -y consul
     echo changed
   register: mickey_consul_package_result
   changed_when: "'changed' in mickey_consul_package_result.stdout"
+  when: mickey_consul_install_method_effective == 'apt'
+
+- name: Remove the HashiCorp apt repository when using direct Consul install
+  ansible.builtin.raw: |
+    set -eu
+    changed=0
+    for path in {{ mickey_consul_repo_file_effective | quote }} {{ (mickey_consul_repo_file_effective ~ '.save') | quote }}; do
+      if [ -e "$path" ]; then
+        rm -f "$path"
+        changed=1
+      fi
+    done
+
+    if [ "$changed" -eq 1 ]; then
+      apt-get -o Acquire::ForceIPv4=true update
+      echo changed
+    fi
+  register: mickey_consul_direct_repo_absent_result
+  changed_when: "'changed' in mickey_consul_direct_repo_absent_result.stdout"
+  when: mickey_consul_install_method_effective == 'direct'
+
+- name: Ensure the Consul system user exists for direct installs
+  ansible.builtin.raw: |
+    set -eu
+    changed=0
+    if ! getent group consul >/dev/null; then
+      groupadd --system consul
+      changed=1
+    fi
+    if ! id -u consul >/dev/null 2>&1; then
+      useradd --system --gid consul --home-dir {{ mickey_consul_config_dir_effective | quote }} --shell /usr/sbin/nologin consul
+      changed=1
+    fi
+
+    if [ "$changed" -eq 1 ]; then
+      echo changed
+    fi
+  register: mickey_consul_direct_user_result
+  changed_when: "'changed' in mickey_consul_direct_user_result.stdout"
+  when: mickey_consul_install_method_effective == 'direct'
+
+- name: Install the Consul binary directly
+  ansible.builtin.raw: |
+    set -eu
+    target_version={{ mickey_consul_version_effective | quote }}
+    current_version="$(consul version 2>/dev/null | awk 'NR == 1 { print $2 }' | sed 's/^v//' || true)"
+    if [ "$current_version" = "$target_version" ]; then
+      exit 0
+    fi
+
+    case "$(uname -m)" in
+      x86_64|amd64) release_arch=amd64 ;;
+      aarch64|arm64) release_arch=arm64 ;;
+      *) echo "unsupported Consul architecture: $(uname -m)" >&2; exit 1 ;;
+    esac
+
+    tmp_dir="$(mktemp -d)"
+    trap 'rm -rf "$tmp_dir"' EXIT
+    archive="$tmp_dir/consul.zip"
+    curl -fsSL --retry 3 --connect-timeout 10 --max-time 300 \
+      "https://releases.hashicorp.com/consul/${target_version}/consul_${target_version}_linux_${release_arch}.zip" \
+      -o "$archive"
+    unzip -q "$archive" -d "$tmp_dir"
+    install -D -m 0755 -o root -g root "$tmp_dir/consul" /usr/local/bin/consul
+    /usr/local/bin/consul version >/dev/null
+    echo changed
+  register: mickey_consul_direct_binary_result
+  changed_when: "'changed' in mickey_consul_direct_binary_result.stdout"
+  when: mickey_consul_install_method_effective == 'direct'
+
+- name: Install the Consul systemd unit for direct installs
+  ansible.builtin.raw: |
+    set -eu
+    tmp="$(mktemp)"
+    trap 'rm -f "$tmp"' EXIT
+    cat > "$tmp" <<'EOF'
+    [Unit]
+    Description=Consul service discovery agent
+    Documentation=https://developer.hashicorp.com/consul/
+    Wants=network-online.target
+    After=network-online.target
+
+    [Service]
+    User=consul
+    Group=consul
+    ExecStart=/usr/local/bin/consul agent -config-dir={{ mickey_consul_config_dir_effective }}
+    ExecReload=/bin/kill -HUP $MAINPID
+    KillMode=process
+    Restart=on-failure
+    LimitNOFILE=65536
+
+    [Install]
+    WantedBy=multi-user.target
+    EOF
+
+    if [ -f /etc/systemd/system/consul.service ] && cmp -s "$tmp" /etc/systemd/system/consul.service; then
+      exit 0
+    fi
+
+    install -D -m 0644 -o root -g root "$tmp" /etc/systemd/system/consul.service
+    systemctl daemon-reload
+    echo changed
+  register: mickey_consul_direct_unit_result
+  changed_when: "'changed' in mickey_consul_direct_unit_result.stdout"
+  when: mickey_consul_install_method_effective == 'direct'
 
 - name: Ensure the Consul config and data directories exist
   ansible.builtin.raw: |
