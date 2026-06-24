@@ -10,6 +10,17 @@
       or (github.galvanic_token | string | length) == 0
     )
 
+- name: Fail when the GitHub CLI token is missing
+  ansible.builtin.fail:
+    msg: "github.cli_token must be present in the secrets file to configure GitHub CLI auth."
+  when: >-
+    mickey_github_cli_auth_enable | bool
+    and (
+      github is not defined
+      or github.cli_token is not defined
+      or (github.cli_token | string | length) == 0
+    )
+
 - name: Ensure the Galvanic config directory exists
   ansible.builtin.file:
     path: "{{ mickey_github_packages_config_dir }}"
@@ -17,18 +28,46 @@
     owner: "{{ mickey_guest_admin_user }}"
     group: "{{ mickey_guest_admin_user }}"
     mode: "0700"
-  when: mickey_github_packages_auth_enable | bool
+  when: mickey_github_packages_auth_enable | bool or mickey_github_cli_auth_enable | bool
+
+- name: Ensure the GitHub CLI config directory exists
+  ansible.builtin.file:
+    path: "{{ mickey_github_cli_config_dir }}"
+    state: directory
+    owner: "{{ mickey_guest_admin_user }}"
+    group: "{{ mickey_guest_admin_user }}"
+    mode: "0700"
+  when: mickey_github_cli_auth_enable | bool
 
 - name: Install the Galvanic GitHub token environment file
   ansible.builtin.copy:
     dest: "{{ mickey_github_packages_env_path }}"
     content: |
       export GITHUB_GALVANIC_TOKEN={{ github.galvanic_token | quote }}
+      export GITHUB_ISSUE_TOKEN={{ github.cli_token | quote }}
+      export GH_TOKEN="$GITHUB_ISSUE_TOKEN"
     owner: "{{ mickey_guest_admin_user }}"
     group: "{{ mickey_guest_admin_user }}"
     mode: "0600"
   no_log: true
-  when: mickey_github_packages_auth_enable | bool
+  when: mickey_github_packages_auth_enable | bool or mickey_github_cli_auth_enable | bool
+
+- name: Install GitHub CLI host auth
+  ansible.builtin.copy:
+    dest: "{{ mickey_github_cli_hosts_path }}"
+    content: |
+      github.com:
+          users:
+              {{ mickey_github_cli_user }}:
+                  oauth_token: {{ github.cli_token }}
+          git_protocol: ssh
+          user: {{ mickey_github_cli_user }}
+          oauth_token: {{ github.cli_token }}
+    owner: "{{ mickey_guest_admin_user }}"
+    group: "{{ mickey_guest_admin_user }}"
+    mode: "0600"
+  no_log: true
+  when: mickey_github_cli_auth_enable | bool
 
 - name: Ensure admin shells source the Galvanic GitHub token
   ansible.builtin.blockinfile:
@@ -47,7 +86,7 @@
     - "{{ mickey_guest_admin_home }}/.zshrc"
     - "{{ mickey_guest_admin_home }}/.profile"
     - "{{ mickey_guest_admin_home }}/.zprofile"
-  when: mickey_github_packages_auth_enable | bool
+  when: mickey_github_packages_auth_enable | bool or mickey_github_cli_auth_enable | bool
 
 - name: Configure npm for Galvanic GitHub Packages
   ansible.builtin.blockinfile:

@@ -118,6 +118,10 @@ mickey_github_packages_config_dir: "{{ mickey_guest_admin_home }}/.config/galvan
 mickey_github_packages_env_path: "{{ mickey_github_packages_config_dir }}/github.env"
 mickey_github_packages_scope: "@galvanicappliedsciences"
 mickey_github_packages_registry: "https://npm.pkg.github.com"
+mickey_github_cli_auth_enable: true
+mickey_github_cli_user: mtadros-galvanic
+mickey_github_cli_config_dir: "{{ mickey_guest_admin_home }}/.config/gh"
+mickey_github_cli_hosts_path: "{{ mickey_github_cli_config_dir }}/hosts.yml"
 
 mickey_pm2_enable: true
 mickey_pm2_version: "7.0.1"

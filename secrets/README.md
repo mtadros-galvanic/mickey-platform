@@ -23,6 +23,7 @@ The secrets file is split into three namespaces:
   - Samba username and password for the `mickey-infra` share
 - `github`
   - GitHub Packages token for Galvanic npm package access
+  - GitHub CLI token for repository and issue access from managed guests
 
 ## Workflow
 
