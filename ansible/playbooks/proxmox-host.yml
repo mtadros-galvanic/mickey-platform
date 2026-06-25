@@ -256,22 +256,6 @@
         line: "//{{ mickey_proxmox_share_server }}/{{ mickey_proxmox_share_name }} {{ mickey_proxmox_share_mount_path }} cifs {{ mickey_proxmox_share_fstab_options }} 0 0"
       when: mickey_proxmox_share_enable | default(true) | bool
 
-    - name: Ensure the Proxmox fast share mount path exists
-      ansible.builtin.file:
-        path: "{{ mickey_proxmox_fast_share_mount_path }}"
-        state: directory
-        owner: root
-        group: root
-        mode: "0770"
-      when: mickey_proxmox_share_enable | default(true) | bool
-
-    - name: Persist the Proxmox fast share automount in fstab
-      ansible.builtin.lineinfile:
-        path: /etc/fstab
-        regexp: "^//[^[:space:]]+\\s+{{ mickey_proxmox_fast_share_mount_path | regex_escape() }}\\s+cifs\\s"
-        line: "//{{ mickey_proxmox_fast_share_server }}/{{ mickey_proxmox_fast_share_name }} {{ mickey_proxmox_fast_share_mount_path }} cifs {{ mickey_proxmox_fast_share_fstab_options }} 0 0"
-      when: mickey_proxmox_share_enable | default(true) | bool
-
     - name: Reload systemd to pick up the Proxmox share automount
       ansible.builtin.systemd:
         daemon_reload: true
@@ -307,24 +291,13 @@
         - mickey_proxmox_share_enable | default(true) | bool
         - mickey_proxmox_share_endpoint_probe.rc == 0
 
-    - name: Mount the Proxmox fast share when the infra Samba endpoint is reachable
-      ansible.builtin.shell: |
-        mount_point={{ mickey_proxmox_fast_share_mount_path | quote }}
-        if mountpoint -q "$mount_point"; then
-          options="$(findmnt -no OPTIONS --target "$mount_point" || true)"
-          if printf '%s\n' "$options" | grep -qw mfsymlinks; then
-            mount -o remount "$mount_point"
-            exit 0
-          fi
-          umount "$mount_point"
-        fi
-        mount "$mount_point"
-      args:
-        executable: /bin/bash
-      changed_when: false
+    - name: Configure the Proxmox fast share over NFS
+      ansible.builtin.include_tasks: ../tasks/configure-fast-share-nfs-client.yml
+      vars:
+        mickey_fast_share_client_mount_path: "{{ mickey_proxmox_fast_share_mount_path }}"
       when:
         - mickey_proxmox_share_enable | default(true) | bool
-        - mickey_proxmox_share_endpoint_probe.rc == 0
+        - mickey_fast_share_nfs_enable | default(false) | bool
 
     - name: Explain why the first Proxmox share mount was skipped
       ansible.builtin.debug:

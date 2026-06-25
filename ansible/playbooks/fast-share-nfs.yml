@@ -1,0 +1,45 @@
+---
+- name: Configure fast share NFS export on infra
+  hosts: infra_vms
+  become: true
+  gather_facts: false
+
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+
+  tasks:
+    - name: Configure fast share NFS export
+      ansible.builtin.include_tasks: ../tasks/configure-fast-share-nfs-export.yml
+      when: mickey_fast_share_nfs_enable | default(false) | bool
+
+- name: Mount fast share over NFS on Mickey guests
+  hosts: guest_vms
+  become: true
+  gather_facts: false
+
+  vars:
+    ansible_python_interpreter: "{{ '/opt/mickey-python/cpython-3.12.13+20260610/bin/python3.12' if inventory_hostname == 'mickey-thud' else '/usr/bin/python3' }}"
+
+  tasks:
+    - name: Configure fast share NFS client
+      ansible.builtin.include_tasks: ../tasks/configure-fast-share-nfs-client.yml
+      vars:
+        mickey_fast_share_client_mount_path: "{{ mickey_fast_shared_mount_path }}"
+      when: mickey_fast_share_nfs_enable | default(false) | bool
+
+- name: Mount fast share over NFS on Proxmox hosts
+  hosts: proxmox_hosts
+  become: true
+  gather_facts: false
+
+  vars:
+    mickey_guest_admin_user: root
+
+  tasks:
+    - name: Configure fast share NFS client
+      ansible.builtin.include_tasks: ../tasks/configure-fast-share-nfs-client.yml
+      vars:
+        mickey_fast_share_client_mount_path: "{{ mickey_proxmox_fast_share_mount_path }}"
+      when:
+        - mickey_proxmox_share_enable | default(true) | bool
+        - mickey_fast_share_nfs_enable | default(false) | bool

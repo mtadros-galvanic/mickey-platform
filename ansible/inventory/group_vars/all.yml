@@ -5,6 +5,12 @@ mickey_guest_fqdn: "{{ inventory_hostname }}.galvanic.local"
 
 mickey_shared_mount_path: /mnt/mickey-share
 mickey_fast_shared_mount_path: /mnt/mickey-shared-fast
+mickey_fast_share_nfs_enable: true
+mickey_fast_share_nfs_server: "{{ hostvars['mickey-infra'].ansible_host | default('10.25.1.206') }}"
+mickey_fast_share_nfs_export_path: /srv/mickey-shared-fast
+mickey_fast_share_nfs_allowed_network: 10.25.1.0/24
+mickey_fast_share_nfs_export_options: "rw,sync,no_subtree_check,root_squash,anonuid=1000,anongid=1000"
+mickey_fast_share_nfs_fstab_options: "rw,vers=4.2,_netdev,nofail,x-systemd.automount,x-systemd.idle-timeout=60"
 mickey_persistent_tools_enable: true
 mickey_persistent_tools_export_path: /srv/persistent-tools
 mickey_persistent_tools_mount_path: /mnt/persistent-tools

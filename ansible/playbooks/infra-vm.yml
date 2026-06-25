@@ -501,6 +501,10 @@
         - "{{ mickey_codex_hosts_root }}"
         - "{{ mickey_codex_shared_skills_path }}"
 
+    - name: Configure the fast share NFS export on the infra guest
+      ansible.builtin.include_tasks: ../tasks/configure-fast-share-nfs-export.yml
+      when: mickey_fast_share_nfs_enable | default(false) | bool
+
     - name: Configure the persistent tools export on the infra guest
       ansible.builtin.include_tasks: ../tasks/configure-persistent-tools-infra.yml
       when: mickey_persistent_tools_enable | default(false) | bool

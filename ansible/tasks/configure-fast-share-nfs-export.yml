@@ -1,0 +1,48 @@
+---
+- name: Ensure NFS server packages are installed for the fast share
+  ansible.builtin.apt:
+    name:
+      - nfs-kernel-server
+    state: present
+    update_cache: true
+
+- name: Ensure the share service group exists
+  ansible.builtin.group:
+    name: sambashare
+    state: present
+
+- name: Ensure the fast share export path exists
+  ansible.builtin.file:
+    path: "{{ mickey_fast_share_nfs_export_path }}"
+    state: directory
+    owner: "{{ mickey_guest_admin_user }}"
+    group: sambashare
+    mode: "0770"
+
+- name: Ensure the NFS exports directory exists
+  ansible.builtin.file:
+    path: /etc/exports.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Export the fast share over NFS
+  ansible.builtin.copy:
+    dest: /etc/exports.d/mickey-shared-fast.exports
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      {{ mickey_fast_share_nfs_export_path }} {{ mickey_fast_share_nfs_allowed_network }}({{ mickey_fast_share_nfs_export_options }})
+  register: mickey_fast_share_nfs_exports_result
+
+- name: Reload NFS exports for the fast share
+  ansible.builtin.command: exportfs -ra
+  when: mickey_fast_share_nfs_exports_result.changed
+
+- name: Ensure the NFS server is enabled and running
+  ansible.builtin.service:
+    name: nfs-kernel-server
+    state: started
+    enabled: true

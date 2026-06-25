@@ -1,0 +1,80 @@
+---
+- name: Ensure fast share client package is installed
+  ansible.builtin.raw: |
+    set -eu
+    export DEBIAN_FRONTEND=noninteractive
+    if dpkg-query -W -f='${Status}' nfs-common 2>/dev/null | grep -q 'install ok installed'; then
+      exit 0
+    fi
+    apt-get -o Acquire::ForceIPv4=true update
+    apt-get -o Acquire::ForceIPv4=true install -y nfs-common
+    echo changed
+  register: mickey_fast_share_nfs_common_result
+  changed_when: "'changed' in mickey_fast_share_nfs_common_result.stdout"
+  when: inventory_hostname not in (groups['infra_vms'] | default([]))
+
+- name: Ensure the fast share mount point exists
+  ansible.builtin.raw: |
+    set -eu
+    mount_point={{ mickey_fast_share_client_mount_path | quote }}
+    if mountpoint -q "$mount_point"; then
+      exit 0
+    fi
+    owner={{ mickey_guest_admin_user | quote }}
+    install -d -m 0770 -o "$owner" -g "$owner" "$mount_point"
+  changed_when: false
+
+- name: Persist the fast share NFS automount
+  ansible.builtin.raw: |
+    set -eu
+    mount_point={{ mickey_fast_share_client_mount_path | quote }}
+    line="{{ mickey_fast_share_nfs_server }}:{{ mickey_fast_share_nfs_export_path }} {{ mickey_fast_share_client_mount_path }} nfs4 {{ mickey_fast_share_nfs_fstab_options }} 0 0"
+    tmp="$(mktemp)"
+    trap 'rm -f "$tmp"' EXIT
+
+    if grep -Fqx "$line" /etc/fstab; then
+      current_count="$(awk -v mp="$mount_point" '$2 == mp && ($3 == "nfs" || $3 == "nfs4") { count++ } END { print count + 0 }' /etc/fstab)"
+      cifs_count="$(awk -v mp="$mount_point" '$2 == mp && ($3 == "cifs" || $3 == "smb3") { count++ } END { print count + 0 }' /etc/fstab)"
+      if [ "$current_count" -eq 1 ] && [ "$cifs_count" -eq 0 ]; then
+        exit 0
+      fi
+    fi
+
+    awk -v mp="$mount_point" '!(($2 == mp) && ($3 == "cifs" || $3 == "smb3" || $3 == "nfs" || $3 == "nfs4"))' /etc/fstab > "$tmp"
+    printf '%s\n' "$line" >> "$tmp"
+    cat "$tmp" > /etc/fstab
+    echo changed
+  register: mickey_fast_share_nfs_fstab_result
+  changed_when: "'changed' in mickey_fast_share_nfs_fstab_result.stdout"
+  when: inventory_hostname not in (groups['infra_vms'] | default([]))
+
+- name: Reload systemd after fast share fstab changes
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: inventory_hostname not in (groups['infra_vms'] | default([]))
+
+- name: Mount the fast share over NFS
+  ansible.builtin.shell: |
+    set -eu
+    mount_point={{ mickey_fast_share_client_mount_path | quote }}
+    expected_source={{ (mickey_fast_share_nfs_server ~ ':' ~ mickey_fast_share_nfs_export_path) | quote }}
+    expected_subpath={{ mickey_fast_share_nfs_export_path | quote }}
+
+    if mountpoint -q "$mount_point"; then
+      if findmnt -rn -o SOURCE,FSTYPE --target "$mount_point" | awk \
+        -v expected_source="$expected_source" \
+        -v expected_subpath="$expected_subpath" \
+        '($2 == "nfs" || $2 == "nfs4") && ($1 == expected_source || index($1, "[" expected_subpath "]") > 0) { found = 1 } END { exit found ? 0 : 1 }'
+      then
+        exit 0
+      fi
+      umount "$mount_point" || umount -l "$mount_point"
+    fi
+
+    mount "$mount_point"
+    echo changed
+  args:
+    executable: /bin/bash
+  register: mickey_fast_share_nfs_mount_result
+  changed_when: "'changed' in mickey_fast_share_nfs_mount_result.stdout"
+  when: inventory_hostname not in (groups['infra_vms'] | default([]))
