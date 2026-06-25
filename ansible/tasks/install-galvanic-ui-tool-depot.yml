@@ -1,0 +1,130 @@
+---
+- name: Ensure the Galvanic UI tool depot parent directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ mickey_guest_admin_user }}"
+    group: "{{ mickey_guest_admin_user }}"
+    mode: "0755"
+  loop:
+    - "{{ mickey_persistent_tools_export_path }}"
+    - "{{ mickey_galvanic_ui_pnpm_store_dir }}"
+
+- name: Ensure GitHub is trusted for Galvanic UI SSH access
+  ansible.builtin.raw: |
+    set -eu
+    install -d -m 0700 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} {{ (mickey_guest_admin_home ~ '/.ssh') | quote }}
+    touch {{ (mickey_guest_admin_home ~ '/.ssh/known_hosts') | quote }}
+    chown {{ mickey_guest_admin_user | quote }}:{{ mickey_guest_admin_user | quote }} {{ (mickey_guest_admin_home ~ '/.ssh/known_hosts') | quote }}
+    chmod 0600 {{ (mickey_guest_admin_home ~ '/.ssh/known_hosts') | quote }}
+    if ! ssh-keygen -F github.com -f {{ (mickey_guest_admin_home ~ '/.ssh/known_hosts') | quote }} >/dev/null 2>&1; then
+      ssh-keyscan -H github.com >> {{ (mickey_guest_admin_home ~ '/.ssh/known_hosts') | quote }}
+      chown {{ mickey_guest_admin_user | quote }}:{{ mickey_guest_admin_user | quote }} {{ (mickey_guest_admin_home ~ '/.ssh/known_hosts') | quote }}
+    fi
+  changed_when: false
+
+- name: Clone and build Galvanic UI in the persistent tools depot
+  ansible.builtin.raw: |
+    set -eu
+    repo={{ mickey_galvanic_ui_repo_url | quote }}
+    ref={{ mickey_galvanic_ui_ref | quote }}
+    dest={{ mickey_galvanic_ui_export_dir | quote }}
+    store={{ mickey_galvanic_ui_pnpm_store_dir | quote }}
+    owner={{ mickey_guest_admin_user | quote }}
+    ssh_key={{ (mickey_guest_admin_home ~ '/.ssh/mt-github') | quote }}
+    node_bin={{ (mickey_codex_local_bin_dir ~ '/node') | quote }}
+    pnpm_bin={{ (mickey_codex_local_bin_dir ~ '/pnpm') | quote }}
+    env_file={{ mickey_github_packages_env_path | quote }}
+    state_dir={{ (mickey_persistent_tools_export_path ~ '/.state') | quote }}
+    marker="$state_dir/galvanic-ui-build-commit"
+    legacy_marker="$dest/.mickey-build-commit"
+    changed=0
+
+    if [ ! -x "$node_bin" ]; then
+      echo "missing Node runtime at $node_bin" >&2
+      exit 1
+    fi
+
+    if [ ! -x "$pnpm_bin" ]; then
+      echo "missing pnpm runtime at $pnpm_bin" >&2
+      exit 1
+    fi
+
+    if [ ! -f "$ssh_key" ]; then
+      echo "missing GitHub SSH key at $ssh_key" >&2
+      exit 1
+    fi
+
+    install -d -m 0755 -o "$owner" -g "$owner" "$(dirname "$dest")" "$store" "$state_dir"
+
+    run_as_admin() {
+      sudo -H -u "$owner" env \
+        HOME={{ mickey_guest_admin_home | quote }} \
+        PATH={{ mickey_codex_local_bin_dir | quote }}:/usr/local/bin:/usr/bin:/bin \
+        GIT_SSH_COMMAND="ssh -i $ssh_key -o BatchMode=yes -o StrictHostKeyChecking=accept-new" \
+        GITHUB_GALVANIC_TOKEN="${GITHUB_GALVANIC_TOKEN:-}" \
+        GITHUB_ISSUE_TOKEN="${GITHUB_ISSUE_TOKEN:-}" \
+        GH_TOKEN="${GH_TOKEN:-}" \
+        COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
+        "$@"
+    }
+
+    run_as_admin_in_repo() {
+      sudo -H -u "$owner" env \
+        HOME={{ mickey_guest_admin_home | quote }} \
+        PATH={{ mickey_codex_local_bin_dir | quote }}:/usr/local/bin:/usr/bin:/bin \
+        GIT_SSH_COMMAND="ssh -i $ssh_key -o BatchMode=yes -o StrictHostKeyChecking=accept-new" \
+        GITHUB_GALVANIC_TOKEN="${GITHUB_GALVANIC_TOKEN:-}" \
+        GITHUB_ISSUE_TOKEN="${GITHUB_ISSUE_TOKEN:-}" \
+        GH_TOKEN="${GH_TOKEN:-}" \
+        COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
+        bash -lc 'cd "$1" && shift && "$@"' bash "$dest" "$@"
+    }
+
+    if [ ! -d "$dest/.git" ]; then
+      rm -rf "$dest"
+      run_as_admin git clone "$repo" "$dest"
+      changed=1
+    fi
+
+    before="$(cd "$dest" && git rev-parse HEAD 2>/dev/null || true)"
+    run_as_admin git -C "$dest" fetch --tags origin
+    run_as_admin git -C "$dest" checkout "$ref"
+    run_as_admin git -C "$dest" submodule update --init --recursive
+    after="$(cd "$dest" && git rev-parse HEAD)"
+
+    if [ "$before" != "$after" ]; then
+      changed=1
+    fi
+
+    built="$(cat "$marker" 2>/dev/null || true)"
+    if [ -f "$legacy_marker" ] && [ ! -f "$marker" ]; then
+      mv "$legacy_marker" "$marker"
+      chown "$owner:$owner" "$marker"
+      built="$(cat "$marker" 2>/dev/null || true)"
+    fi
+    rm -f "$legacy_marker"
+
+    if [ "$built" != "$after" ] || [ ! -f "$dest/dist/styles.css" ]; then
+      if [ -f "$env_file" ]; then
+        set -a
+        . "$env_file"
+        set +a
+      fi
+
+      run_as_admin_in_repo "$pnpm_bin" install --frozen-lockfile --store-dir "$store"
+      run_as_admin_in_repo "$pnpm_bin" build
+      printf '%s\n' "$after" > "$marker"
+      chown "$owner:$owner" "$marker"
+      changed=1
+    fi
+
+    test -f "$dest/dist/styles.css"
+
+    if [ "$changed" -eq 1 ]; then
+      echo changed
+    fi
+  args:
+    executable: /bin/bash
+  register: mickey_galvanic_ui_depot_result
+  changed_when: "'changed' in mickey_galvanic_ui_depot_result.stdout"

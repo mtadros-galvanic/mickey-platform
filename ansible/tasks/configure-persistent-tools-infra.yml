@@ -1,0 +1,77 @@
+---
+- name: Ensure NFS server packages are installed for persistent tools
+  ansible.builtin.apt:
+    name:
+      - nfs-kernel-server
+    state: present
+    update_cache: true
+
+- name: Ensure the persistent tools export path exists
+  ansible.builtin.file:
+    path: "{{ mickey_persistent_tools_export_path }}"
+    state: directory
+    owner: "{{ mickey_guest_admin_user }}"
+    group: "{{ mickey_guest_admin_user }}"
+    mode: "0755"
+
+- name: Ensure the persistent tools mount path exists on infra
+  ansible.builtin.raw: |
+    set -eu
+    mount_point={{ mickey_persistent_tools_mount_path | quote }}
+    if mountpoint -q "$mount_point"; then
+      exit 0
+    fi
+    install -d -m 0755 -o root -g root "$mount_point"
+  changed_when: false
+
+- name: Persist the infra-local persistent tools bind mount
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    regexp: "^{{ mickey_persistent_tools_export_path | regex_escape() }}\\s+{{ mickey_persistent_tools_mount_path | regex_escape() }}\\s+none\\s"
+    line: "{{ mickey_persistent_tools_export_path }} {{ mickey_persistent_tools_mount_path }} none defaults,bind 0 0"
+
+- name: Mount the infra-local persistent tools bind mount
+  ansible.builtin.shell: |
+    set -eu
+    expected_subpath={{ mickey_persistent_tools_export_path | quote }}
+    if mountpoint -q {{ mickey_persistent_tools_mount_path | quote }}; then
+      current_source="$(findmnt -n -o SOURCE --target {{ mickey_persistent_tools_mount_path | quote }} || true)"
+      case "$current_source" in
+        "$expected_subpath"|*"[$expected_subpath]") exit 0 ;;
+      esac
+      umount {{ mickey_persistent_tools_mount_path | quote }}
+    fi
+    mount {{ mickey_persistent_tools_mount_path | quote }}
+    echo changed
+  args:
+    executable: /bin/bash
+  register: mickey_persistent_tools_bind_mount_result
+  changed_when: "'changed' in mickey_persistent_tools_bind_mount_result.stdout"
+
+- name: Ensure the NFS exports directory exists
+  ansible.builtin.file:
+    path: /etc/exports.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Export the persistent tools depot over NFS
+  ansible.builtin.copy:
+    dest: /etc/exports.d/mickey-persistent-tools.exports
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      {{ mickey_persistent_tools_export_path }} {{ mickey_persistent_tools_allowed_network }}({{ mickey_persistent_tools_nfs_export_options }})
+  register: mickey_persistent_tools_exports_result
+
+- name: Reload NFS exports for persistent tools
+  ansible.builtin.command: exportfs -ra
+  when: mickey_persistent_tools_exports_result.changed
+
+- name: Ensure the NFS server is enabled and running
+  ansible.builtin.service:
+    name: nfs-kernel-server
+    state: started
+    enabled: true

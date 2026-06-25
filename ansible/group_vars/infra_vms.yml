@@ -2,6 +2,7 @@ mickey_infra_extra_apt_packages:
   - docker-compose-v2
   - docker.io
   - dnsmasq
+  - nfs-kernel-server
   - samba
 mickey_infra_apt_packages: "{{ (mickey_vm_base_apt_packages + mickey_infra_extra_apt_packages) | unique }}"
 mickey_vm_apt_packages: "{{ mickey_infra_apt_packages }}"

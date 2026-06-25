@@ -5,6 +5,20 @@ mickey_guest_fqdn: "{{ inventory_hostname }}.galvanic.local"
 
 mickey_shared_mount_path: /mnt/mickey-share
 mickey_fast_shared_mount_path: /mnt/mickey-shared-fast
+mickey_persistent_tools_enable: true
+mickey_persistent_tools_export_path: /srv/persistent-tools
+mickey_persistent_tools_mount_path: /mnt/persistent-tools
+mickey_persistent_tools_server: "{{ hostvars['mickey-infra'].ansible_host | default('10.25.1.206') }}"
+mickey_persistent_tools_allowed_network: 10.25.1.0/24
+mickey_persistent_tools_nfs_export_options: "ro,sync,no_subtree_check,root_squash"
+mickey_persistent_tools_nfs_fstab_options: "ro,vers=4.2,_netdev,nofail,x-systemd.automount,x-systemd.idle-timeout=60"
+mickey_persistent_tools_profile_script_path: /etc/profile.d/mickey-persistent-tools.sh
+mickey_galvanic_ui_enable: true
+mickey_galvanic_ui_repo_url: git@github.com:GalvanicAppliedSciences/galvanic-ui.git
+mickey_galvanic_ui_ref: 3af42eabbf29ba8e28500eb6bc8e09ba9e62aaf8
+mickey_galvanic_ui_dir: "{{ mickey_persistent_tools_mount_path }}/galvanic-ui"
+mickey_galvanic_ui_export_dir: "{{ mickey_persistent_tools_export_path }}/galvanic-ui"
+mickey_galvanic_ui_pnpm_store_dir: "{{ mickey_persistent_tools_export_path }}/.pnpm-store/galvanic-ui"
 
 mickey_vm_base_apt_packages:
   - bubblewrap
@@ -14,6 +28,7 @@ mickey_vm_base_apt_packages:
   - iputils-ping
   - jq
   - mosh
+  - nfs-common
   - python3
   - qemu-guest-agent
   - ripgrep

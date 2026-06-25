@@ -18,3 +18,7 @@
 - name: Configure Galvanic GitHub Packages auth for the VM admin user
   ansible.builtin.include_tasks: ../tasks/configure-github-packages-auth.yml
   when: mickey_github_packages_auth_enable | default(false) | bool
+
+- name: Mount and configure the persistent tools depot for the VM
+  ansible.builtin.include_tasks: ../tasks/configure-persistent-tools-client.yml
+  when: mickey_persistent_tools_enable | default(false) | bool

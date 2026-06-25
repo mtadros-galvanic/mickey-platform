@@ -1,0 +1,44 @@
+---
+- name: Configure persistent tools export on infra
+  hosts: infra_vms
+  become: true
+  gather_facts: false
+
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+    mickey_codex_node_version: "24.15.0"
+
+  pre_tasks:
+    - name: Load secrets if provided
+      ansible.builtin.include_vars:
+        file: "{{ secret_vars_file }}"
+      when: secret_vars_file is defined
+      no_log: true
+
+  tasks:
+    - name: Configure persistent tools export
+      ansible.builtin.include_tasks: ../tasks/configure-persistent-tools-infra.yml
+
+    - name: Ensure infra has the Node, pnpm, and Codex tooling needed to build tools
+      ansible.builtin.include_tasks: ../tasks/install-codex-cli.yml
+      when: mickey_codex_enable | default(false) | bool
+
+    - name: Configure Galvanic GitHub Packages auth on infra
+      ansible.builtin.include_tasks: ../tasks/configure-github-packages-auth.yml
+      when: mickey_github_packages_auth_enable | default(false) | bool
+
+    - name: Install Galvanic UI into the persistent tools depot
+      ansible.builtin.include_tasks: ../tasks/install-galvanic-ui-tool-depot.yml
+      when: mickey_galvanic_ui_enable | default(false) | bool
+
+- name: Mount persistent tools on Mickey guests
+  hosts: guest_vms
+  become: true
+  gather_facts: false
+
+  vars:
+    ansible_python_interpreter: "{{ '/opt/mickey-python/cpython-3.12.13+20260610/bin/python3.12' if inventory_hostname == 'mickey-thud' else '/usr/bin/python3' }}"
+
+  tasks:
+    - name: Configure persistent tools client
+      ansible.builtin.include_tasks: ../tasks/configure-persistent-tools-client.yml

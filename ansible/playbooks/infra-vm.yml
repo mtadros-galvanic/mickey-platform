@@ -501,6 +501,10 @@
         - "{{ mickey_codex_hosts_root }}"
         - "{{ mickey_codex_shared_skills_path }}"
 
+    - name: Configure the persistent tools export on the infra guest
+      ansible.builtin.include_tasks: ../tasks/configure-persistent-tools-infra.yml
+      when: mickey_persistent_tools_enable | default(false) | bool
+
     - name: Install the Samba configuration
       ansible.builtin.template:
         src: "{{ playbook_dir }}/../templates/smb.conf.j2"
@@ -528,3 +532,9 @@
 
     - name: Apply the shared VM admin tooling layer to the infra guest
       ansible.builtin.include_tasks: ../tasks/configure-vm-admin-tooling.yml
+
+    - name: Install Galvanic UI into the persistent tools depot
+      ansible.builtin.include_tasks: ../tasks/install-galvanic-ui-tool-depot.yml
+      when:
+        - mickey_persistent_tools_enable | default(false) | bool
+        - mickey_galvanic_ui_enable | default(false) | bool

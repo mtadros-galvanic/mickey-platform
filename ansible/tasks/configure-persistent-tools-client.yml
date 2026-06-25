@@ -1,0 +1,126 @@
+---
+- name: Ensure persistent tools client package is installed
+  ansible.builtin.raw: |
+    set -eu
+    export DEBIAN_FRONTEND=noninteractive
+    if dpkg-query -W -f='${Status}' nfs-common 2>/dev/null | grep -q 'install ok installed'; then
+      exit 0
+    fi
+    apt-get -o Acquire::ForceIPv4=true update
+    apt-get -o Acquire::ForceIPv4=true install -y nfs-common
+    echo changed
+  register: mickey_persistent_tools_nfs_common_result
+  changed_when: "'changed' in mickey_persistent_tools_nfs_common_result.stdout"
+  when: inventory_hostname not in (groups['infra_vms'] | default([]))
+
+- name: Ensure the persistent tools mount point exists
+  ansible.builtin.raw: |
+    set -eu
+    mount_point={{ mickey_persistent_tools_mount_path | quote }}
+    if mountpoint -q "$mount_point"; then
+      exit 0
+    fi
+    install -d -m 0755 -o root -g root "$mount_point"
+  changed_when: false
+
+- name: Persist the infra-local persistent tools bind mount
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    regexp: "^{{ mickey_persistent_tools_export_path | regex_escape() }}\\s+{{ mickey_persistent_tools_mount_path | regex_escape() }}\\s+none\\s"
+    line: "{{ mickey_persistent_tools_export_path }} {{ mickey_persistent_tools_mount_path }} none defaults,bind 0 0"
+  when: inventory_hostname in (groups['infra_vms'] | default([]))
+
+- name: Persist the persistent tools NFS automount
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    regexp: "^{{ mickey_persistent_tools_server | regex_escape() }}:{{ mickey_persistent_tools_export_path | regex_escape() }}\\s+{{ mickey_persistent_tools_mount_path | regex_escape() }}\\s+nfs4\\s"
+    line: "{{ mickey_persistent_tools_server }}:{{ mickey_persistent_tools_export_path }} {{ mickey_persistent_tools_mount_path }} nfs4 {{ mickey_persistent_tools_nfs_fstab_options }} 0 0"
+  when: inventory_hostname not in (groups['infra_vms'] | default([]))
+
+- name: Remove stale CIFS persistent tools fstab entries
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    regexp: "^//[^[:space:]]+\\s+{{ mickey_persistent_tools_mount_path | regex_escape() }}\\s+cifs\\s"
+    state: absent
+
+- name: Reload systemd after persistent tools fstab changes
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Mount the persistent tools path
+  ansible.builtin.shell: |
+    set -eu
+    mount_point={{ mickey_persistent_tools_mount_path | quote }}
+    expected_source={{ (mickey_persistent_tools_export_path if inventory_hostname in (groups['infra_vms'] | default([])) else mickey_persistent_tools_server ~ ':' ~ mickey_persistent_tools_export_path) | quote }}
+    expected_subpath={{ mickey_persistent_tools_export_path | quote }}
+
+    if mountpoint -q "$mount_point"; then
+      current_source="$(findmnt -n -o SOURCE --target "$mount_point" || true)"
+      case "$current_source" in
+        "$expected_source"|*"[$expected_source]"|*"[$expected_subpath]") exit 0 ;;
+      esac
+      umount "$mount_point"
+    fi
+
+    mount "$mount_point"
+    echo changed
+  args:
+    executable: /bin/bash
+  register: mickey_persistent_tools_mount_result
+  changed_when: "'changed' in mickey_persistent_tools_mount_result.stdout"
+
+- name: Export persistent tools environment for login shells
+  ansible.builtin.copy:
+    dest: "{{ mickey_persistent_tools_profile_script_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Mickey Ansible.
+      if [ -d {{ mickey_galvanic_ui_dir | quote }} ]; then
+        export LAVISH_AXI_GALVANIC_UI_DIR={{ mickey_galvanic_ui_dir | quote }}
+      fi
+
+- name: Ensure the Lavish config directory exists
+  ansible.builtin.file:
+    path: "{{ mickey_guest_admin_home }}/.lavish-axi"
+    state: directory
+    owner: "{{ mickey_guest_admin_user }}"
+    group: "{{ mickey_guest_admin_user }}"
+    mode: "0700"
+  when: mickey_galvanic_ui_enable | default(false) | bool
+
+- name: Configure Lavish Galvanic UI integration
+  ansible.builtin.copy:
+    dest: "{{ mickey_guest_admin_home }}/.lavish-axi/config.json"
+    owner: "{{ mickey_guest_admin_user }}"
+    group: "{{ mickey_guest_admin_user }}"
+    mode: "0600"
+    content: |
+      {
+        "integrations": {
+          "galvanicUi": {
+            "dir": "{{ mickey_galvanic_ui_dir }}"
+          }
+        }
+      }
+  when: mickey_galvanic_ui_enable | default(false) | bool
+
+- name: Ensure admin shells export the Galvanic UI path
+  ansible.builtin.blockinfile:
+    path: "{{ item }}"
+    create: true
+    owner: "{{ mickey_guest_admin_user }}"
+    group: "{{ mickey_guest_admin_user }}"
+    mode: "0644"
+    marker: "# {mark} Mickey persistent tools"
+    block: |
+      if [ -d {{ mickey_galvanic_ui_dir | quote }} ]; then
+        export LAVISH_AXI_GALVANIC_UI_DIR={{ mickey_galvanic_ui_dir | quote }}
+      fi
+  loop:
+    - "{{ mickey_guest_admin_home }}/.bashrc"
+    - "{{ mickey_guest_admin_home }}/.zshrc"
+    - "{{ mickey_guest_admin_home }}/.profile"
+    - "{{ mickey_guest_admin_home }}/.zprofile"
+  when: mickey_galvanic_ui_enable | default(false) | bool
