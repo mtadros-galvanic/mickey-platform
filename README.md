@@ -56,7 +56,7 @@ Managed Linux hosts receive the standalone Codex CLI through `https://chatgpt.co
 The generated inventory now also exposes `consul_client_vms`, which is the set
 of guests that should run a local Consul agent and accept project-owned service
 definitions under `/etc/consul.d/`.
-For `mickey-thud`, `mickey-scarthgap`, and `mickey-brimstone`, the build bootstrap additionally syncs the required GitHub build repos under `~/Projects`, installs manual `mickey-share-mount` and `mickey-share-umount` helpers for the `mickey-infra` Samba share, installs a `mickey-yocto-fetch-diagnose` helper for source-specific fetch testing, and installs `mickey-throttle-yocto` plus matching systemd units for lowering active Yocto build priority when a build VM needs to stay interactive. The throttle timer is off by default for build VMs and enabled for `mickey-scarthgap`.
+For `mickey-thud`, `mickey-scarthgap`, and `mickey-brimstone`, the build bootstrap additionally syncs the required GitHub build repos under `~/Projects`, installs manual `mickey-share-mount` and `mickey-share-umount` helpers for the `mickey-infra` Samba share, installs a `mickey-yocto-fetch-diagnose` helper for source-specific fetch testing, and installs `mickey-throttle-yocto` plus matching systemd units for lowering active Yocto build priority when a build VM needs to stay interactive. The throttle timer is off by default for build VMs and enabled for `mickey-scarthgap`. `mickey-scarthgap` also mounts its dedicated Kingston NVMe partition at `/mnt/yocto-local` so BitBake `TMPDIR` stays on local POSIX storage while shared downloads, sstate, ccache, and artifacts remain under `/mnt/mickey-shared-fast`.
 
 ## Operator Flow
 

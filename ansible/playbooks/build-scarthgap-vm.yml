@@ -47,6 +47,8 @@
     mickey_build_uuu_path: /usr/local/bin/uuu
     mickey_build_uuu_url: https://github.com/nxp-imx/mfgtools/releases/download/uuu_1.5.201/uuu
     mickey_build_dey_dir: /usr/local/dey-5.0
+    mickey_build_yocto_local_mount_path: /mnt/yocto-local
+    mickey_build_yocto_local_uuid: c4eb26c1-faa0-4dd3-b40d-12d1b389d855
     mickey_build_protech_repo_dir: "/home/{{ mickey_guest_admin_user }}/Projects/Protech"
 
   handlers:
@@ -61,6 +63,34 @@
   tasks:
     - name: Run the shared build VM bootstrap for mickey-scarthgap
       ansible.builtin.include_tasks: ../tasks/bootstrap-build-vm.yml
+
+    - name: Mount the local Yocto work disk on mickey-scarthgap
+      ansible.builtin.raw: |
+        set -eu
+        uuid={{ mickey_build_yocto_local_uuid | quote }}
+        mount_point={{ mickey_build_yocto_local_mount_path | quote }}
+        line="UUID=${uuid} ${mount_point} ext4 defaults,noatime 0 2"
+        tmp="$(mktemp)"
+        trap 'rm -f "$tmp"' EXIT
+
+        install -d -m 0775 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} "$mount_point"
+
+        if ! grep -Fqx "$line" /etc/fstab; then
+          awk -v mp="$mount_point" '!(($2 == mp) && ($3 == "ext4"))' /etc/fstab > "$tmp"
+          printf '%s\n' "$line" >> "$tmp"
+          cat "$tmp" > /etc/fstab
+          systemctl daemon-reload
+          echo changed
+        fi
+
+        if ! mountpoint -q "$mount_point"; then
+          mount "$mount_point"
+          echo changed
+        fi
+
+        chown {{ mickey_guest_admin_user | quote }}:{{ mickey_guest_admin_user | quote }} "$mount_point"
+      register: mickey_build_yocto_local_mount_result
+      changed_when: "'changed' in mickey_build_yocto_local_mount_result.stdout"
 
     - name: Remove the Thud-specific repo clones from mickey-scarthgap
       ansible.builtin.raw: |

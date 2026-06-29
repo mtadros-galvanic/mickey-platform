@@ -86,7 +86,8 @@ It deliberately does not deploy the main runtime stack. The primary runtime stac
 - HDD: one ext4-backed Proxmox directory datastore named `bulk`
 - `mickey-infra` receives the existing `2 TiB` share disk during the manual cutover
 - `mickey-thud` keeps its `400 GiB` disk on `bulk`
-- `mickey-scarthgap` and `mickey-brimstone` keep their `500 GiB` build disks on `bulk`
+- `mickey-scarthgap` keeps its `500 GiB` OS disk on `bulk` and receives a dedicated Kingston NVMe partition for local Yocto `TMPDIR` work at `/mnt/yocto-local`
+- `mickey-brimstone` keeps its `500 GiB` build disk on `bulk`
 - `mickey-ise7` imports its legacy Windows disk onto `bulk`
 - remaining `bulk` capacity stays available for backups, ISOs, templates, and future VM disks
 
