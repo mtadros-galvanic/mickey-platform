@@ -8,6 +8,7 @@ mickey_proxmox_apt_packages:
   - e2fsprogs
   - git
   - gh
+  - mosh
   - nfs-common
   - parted
   - shellcheck
