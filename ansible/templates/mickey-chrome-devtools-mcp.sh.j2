@@ -1,0 +1,41 @@
+#!/bin/sh
+set -eu
+
+preferred_toolchain="${MICKEY_CHROME_DEVTOOLS_TOOLCHAIN:-{{ mickey_codex_chrome_devtools_mcp_toolchain_path }}}"
+
+if [ -x "$preferred_toolchain" ]; then
+  exec "$preferred_toolchain" "$@"
+fi
+
+if [ "$#" -eq 0 ]; then
+  echo "usage: mickey-chrome-devtools-mcp npx -y chrome-devtools-mcp@latest [args...]" >&2
+  exit 2
+fi
+
+command_name="$1"
+shift
+
+if [ "$command_name" != "npx" ]; then
+  exec "$command_name" "$@"
+fi
+
+for bin_dir in "$HOME/.local/bin" /usr/local/bin /usr/bin; do
+  node_bin="$bin_dir/node"
+  npx_bin="$bin_dir/npx"
+
+  if [ ! -x "$node_bin" ] || [ ! -x "$npx_bin" ]; then
+    continue
+  fi
+
+  node_major="$("$node_bin" -p 'process.versions.node.split(".")[0]' 2>/dev/null || printf '0')"
+  case "$node_major" in
+    ''|*[!0-9]*) node_major=0 ;;
+  esac
+
+  if [ "$node_major" -ge 20 ]; then
+    PATH="$bin_dir:$PATH" exec "$npx_bin" "$@"
+  fi
+done
+
+echo "chrome-devtools-mcp requires Node 20 or newer; no suitable npx was found" >&2
+exit 1

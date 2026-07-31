@@ -25,6 +25,15 @@ mickey_galvanic_ui_ref: 3af42eabbf29ba8e28500eb6bc8e09ba9e62aaf8
 mickey_galvanic_ui_dir: "{{ mickey_persistent_tools_mount_path }}/galvanic-ui"
 mickey_galvanic_ui_export_dir: "{{ mickey_persistent_tools_export_path }}/galvanic-ui"
 mickey_galvanic_ui_pnpm_store_dir: "{{ mickey_persistent_tools_export_path }}/.pnpm-store/galvanic-ui"
+mickey_lavish_axi_depot_enable: true
+mickey_lavish_axi_version: "0.1.20"
+mickey_lavish_axi_repo_url: git@github.com:Bowriverstudio/lavish-axi.git
+mickey_lavish_axi_ref: dc2b24fc413847a3fbdfb050cb331fe993865977
+mickey_lavish_axi_export_dir: "{{ mickey_persistent_tools_export_path }}/lavish-axi"
+mickey_lavish_axi_client_dir: "{{ mickey_persistent_tools_mount_path }}/lavish-axi"
+mickey_lavish_axi_pnpm_store_dir: "{{ mickey_persistent_tools_export_path }}/.pnpm-store/lavish-axi"
+mickey_lavish_axi_client_enable: false
+mickey_lavish_axi_client_bin_path: /usr/local/bin/lavish-axi
 
 mickey_vm_base_apt_packages:
   - bubblewrap
@@ -53,6 +62,13 @@ mickey_vm_base_configure_codex: true
 mickey_vm_base_configure_codex_auth: true
 mickey_vm_base_configure_dotfiles: true
 mickey_vm_base_configure_consul: "{{ 'consul_client_vms' in group_names }}"
+
+mickey_google_chrome_enable: true
+mickey_google_chrome_package: google-chrome-stable
+mickey_google_chrome_version: "150.0.7871.46-1"
+mickey_google_chrome_keyring_path: /usr/share/keyrings/google-linux-signing-keyring.gpg
+mickey_google_chrome_repo_file: /etc/apt/sources.list.d/google-chrome.list
+mickey_google_chrome_repo_line: "deb [arch=amd64 signed-by={{ mickey_google_chrome_keyring_path }}] https://dl.google.com/linux/chrome/deb/ stable main"
 
 mickey_herdr_enable: true
 mickey_herdr_version: "0.6.2"
@@ -122,9 +138,21 @@ mickey_codex_sandbox_userns_enable: true
 mickey_codex_shared_auth_path: "{{ mickey_codex_shared_root }}/auth.json"
 mickey_codex_shared_skills_path: "{{ mickey_codex_shared_root }}/skills"
 mickey_codex_shared_auth_enable: true
+mickey_codex_chrome_devtools_mcp_wrapper_path: /usr/local/bin/mickey-chrome-devtools-mcp
+mickey_codex_chrome_devtools_mcp_toolchain_path: "{{ mickey_guest_admin_home }}/Projects/Acculase/tools/frontend-toolchain.sh"
 mickey_codex_global_mcp_servers:
   - name: galvanic-ui
     url: http://galvanic-ui.mickey.galvanic.com/mcp
+  - name: chrome-devtools
+    command: "{{ mickey_codex_chrome_devtools_mcp_wrapper_path }}"
+    args:
+      - "npx"
+      - "-y"
+      - "chrome-devtools-mcp@latest"
+      - "--headless"
+      - "--no-usage-statistics"
+      - "--executablePath=/usr/bin/google-chrome-stable"
+      - "--isolated"
 mickey_codex_version: ""
 mickey_codex_enable: true
 

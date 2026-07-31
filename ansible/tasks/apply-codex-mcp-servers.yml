@@ -1,0 +1,76 @@
+---
+- name: Apply global Codex MCP server entries
+  ansible.builtin.raw: |
+    set -eu
+    config={{ (mickey_codex_local_home ~ '/config.toml') | quote }}
+    servers_json={{ mickey_codex_global_mcp_servers | default([]) | to_json | quote }}
+
+    install -d -m 0700 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} "$(dirname "$config")"
+    touch "$config"
+    chown {{ mickey_guest_admin_user | quote }}:{{ mickey_guest_admin_user | quote }} "$config"
+    chmod 0600 "$config"
+
+    python3 - "$config" "$servers_json" <<'PY'
+    import json
+    import os
+    import re
+    import sys
+
+    path = sys.argv[1]
+    servers = json.loads(sys.argv[2])
+
+    with open(path, "r", encoding="utf-8") as fh:
+        text = fh.read()
+
+    original = text
+
+    def toml_string(value):
+        return json.dumps(value)
+
+    def toml_string_array(values):
+        return "[" + ", ".join(toml_string(str(value)) for value in values) + "]"
+
+    for server in servers:
+        name = server["name"]
+        header = "[mcp_servers.{}]".format(name)
+        lines = [header]
+
+        if "url" in server:
+            lines.append("url = {}".format(toml_string(server["url"])))
+        elif "command" in server:
+            lines.append("command = {}".format(toml_string(server["command"])))
+            if server.get("args") is not None:
+                lines.append("args = {}".format(toml_string_array(server.get("args", []))))
+            if server.get("cwd") is not None:
+                lines.append("cwd = {}".format(toml_string(server["cwd"])))
+        else:
+            raise SystemExit("MCP server {} must define url or command".format(name))
+
+        block = "\n".join(lines) + "\n"
+        pattern = re.compile(
+            r"(?ms)^\[mcp_servers\.{}\]\n.*?(?=^\[|\Z)".format(re.escape(name))
+        )
+
+        if pattern.search(text):
+            text = pattern.sub(block, text, count=1)
+        else:
+            if text and not text.endswith("\n"):
+                text += "\n"
+            if text and not text.endswith("\n\n"):
+                text += "\n"
+            text += block
+
+    if text != original:
+        tmp = "{}.tmp".format(path)
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+        print("changed")
+    PY
+    chown {{ mickey_guest_admin_user | quote }}:{{ mickey_guest_admin_user | quote }} "$config"
+    chmod 0600 "$config"
+  register: mickey_codex_global_mcp_result
+  changed_when: "'changed' in mickey_codex_global_mcp_result.stdout"
+  when:
+    - mickey_codex_enable | default(false) | bool
+    - (mickey_codex_global_mcp_servers | default([]) | length) > 0

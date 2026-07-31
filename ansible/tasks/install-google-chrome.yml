@@ -1,0 +1,105 @@
+---
+- name: Ensure Google Chrome is only enabled on amd64 guests
+  ansible.builtin.raw: |
+    set -eu
+    arch="$(dpkg --print-architecture)"
+    if [ "$arch" != "amd64" ]; then
+      echo "google-chrome-stable is only available for amd64 guests; detected architecture: $arch" >&2
+      exit 1
+    fi
+  changed_when: false
+
+- name: Ensure Google Chrome apt prerequisites are installed
+  ansible.builtin.raw: |
+    set -eu
+    missing_packages=""
+    for pkg in ca-certificates curl gnupg; do
+      if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+        missing_packages="$missing_packages $pkg"
+      fi
+    done
+
+    if [ -n "$missing_packages" ]; then
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get -o Acquire::ForceIPv4=true update
+      apt-get -o Acquire::ForceIPv4=true install -y $missing_packages
+      echo changed
+    fi
+  register: mickey_google_chrome_prereq_result
+  changed_when: "'changed' in mickey_google_chrome_prereq_result.stdout"
+
+- name: Install the Google Linux package signing keyring
+  ansible.builtin.raw: |
+    set -eu
+    tmp="$(mktemp)"
+    trap 'rm -f "$tmp"' EXIT
+
+    curl -fsSL --retry 3 --connect-timeout 10 --max-time 120 \
+      https://dl.google.com/linux/linux_signing_key.pub \
+      | gpg --dearmor > "$tmp"
+
+    if [ -f {{ mickey_google_chrome_keyring_path | quote }} ] && cmp -s "$tmp" {{ mickey_google_chrome_keyring_path | quote }}; then
+      exit 0
+    fi
+
+    install -D -m 0644 -o root -g root "$tmp" {{ mickey_google_chrome_keyring_path | quote }}
+    echo changed
+  register: mickey_google_chrome_keyring_result
+  changed_when: "'changed' in mickey_google_chrome_keyring_result.stdout"
+
+- name: Install the Google Chrome apt repository
+  ansible.builtin.raw: |
+    set -eu
+    repo={{ mickey_google_chrome_repo_line | quote }}
+    current_repo="$(cat {{ mickey_google_chrome_repo_file | quote }} 2>/dev/null || true)"
+
+    if [ "$current_repo" = "$repo" ]; then
+      exit 0
+    fi
+
+    printf '%s\n' "$repo" > {{ mickey_google_chrome_repo_file | quote }}
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get -o Acquire::ForceIPv4=true update
+    echo changed
+  register: mickey_google_chrome_repo_result
+  changed_when: "'changed' in mickey_google_chrome_repo_result.stdout"
+
+- name: Install the pinned Google Chrome package
+  ansible.builtin.raw: |
+    set -eu
+    package={{ mickey_google_chrome_package | quote }}
+    version={{ mickey_google_chrome_version | quote }}
+    current_version="$(dpkg-query -W -f='${Version}' "$package" 2>/dev/null || true)"
+    current_hold="$(apt-mark showhold | awk -v pkg="$package" '$0 == pkg { print $0 }')"
+
+    if [ "$current_version" = "$version" ]; then
+      if [ "$current_hold" != "$package" ]; then
+        apt-mark hold "$package" >/dev/null
+        echo changed
+      fi
+      exit 0
+    fi
+
+    if [ "$current_hold" = "$package" ]; then
+      apt-mark unhold "$package" >/dev/null
+    fi
+
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get -o Acquire::ForceIPv4=true update
+    apt-get -o Acquire::ForceIPv4=true install -y --allow-downgrades "$package=$version"
+    apt-mark hold "$package" >/dev/null
+    echo changed
+  register: mickey_google_chrome_package_result
+  changed_when: "'changed' in mickey_google_chrome_package_result.stdout"
+
+- name: Verify the pinned Google Chrome version
+  ansible.builtin.raw: |
+    set -eu
+    actual_version="$(google-chrome --version | awk '{ print $3 }')"
+    expected_version="{{ mickey_google_chrome_version | regex_replace('-[0-9]+$', '') }}"
+
+    if [ "$actual_version" != "$expected_version" ]; then
+      echo "expected Google Chrome $expected_version, got $actual_version" >&2
+      exit 1
+    fi
+  changed_when: false

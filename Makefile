@@ -7,7 +7,7 @@ WIPE_CONFIRM ?= false
 HOST_ANSIBLE_EXTRA_VARS ?=
 REIP_APPLY ?= 0
 
-.PHONY: templates templates-bionic templates-jammy templates-resolute proxmox-reip tf-init tf-plan tf-apply ansible-host ansible-infra ansible-erp ansible-utility ansible-control ansible-desktop ansible-build ansible-build-thud ansible-build-scarthgap ansible-build-brimstone ise7-import
+.PHONY: templates templates-bionic templates-jammy templates-resolute proxmox-reip tf-init tf-plan tf-apply ansible-host ansible-infra ansible-erp ansible-utility ansible-website ansible-control ansible-desktop ansible-build ansible-build-thud ansible-build-scarthgap ansible-build-brimstone ansible-google-chrome ansible-chrome-devtools-mcp ise7-import
 
 templates:
 	BUILD_DESKTOP_TEMPLATE=0 "$(ROOT)scripts/build-proxmox-templates.sh"
@@ -57,6 +57,9 @@ ansible-erp:
 ansible-utility:
 	"$(ROOT)scripts/run-ansible.sh" "$(ROOT)ansible/playbooks/utility-vm.yml" "$(ANSIBLE_BASE_INVENTORY)" "$(ANSIBLE_GENERATED_INVENTORY)"
 
+ansible-website:
+	"$(ROOT)scripts/run-ansible.sh" "$(ROOT)ansible/playbooks/website-vm.yml" "$(ANSIBLE_BASE_INVENTORY)" "$(ANSIBLE_GENERATED_INVENTORY)"
+
 ansible-desktop:
 	$(MAKE) ansible-infra
 
@@ -76,6 +79,12 @@ ansible-build-scarthgap:
 
 ansible-build-brimstone:
 	"$(ROOT)scripts/run-ansible.sh" "$(ROOT)ansible/playbooks/build-brimstone-vm.yml" "$(ANSIBLE_BASE_INVENTORY)" "$(ANSIBLE_GENERATED_INVENTORY)"
+
+ansible-google-chrome:
+	"$(ROOT)scripts/run-ansible.sh" "$(ROOT)ansible/playbooks/google-chrome.yml" "$(ANSIBLE_BASE_INVENTORY)" "$(ANSIBLE_GENERATED_INVENTORY)"
+
+ansible-chrome-devtools-mcp:
+	"$(ROOT)scripts/run-ansible.sh" "$(ROOT)ansible/playbooks/chrome-devtools-mcp.yml" "$(ANSIBLE_BASE_INVENTORY)" "$(ANSIBLE_GENERATED_INVENTORY)"
 
 ise7-import:
 	"$(ROOT)scripts/import-win7-ise-vm.sh"

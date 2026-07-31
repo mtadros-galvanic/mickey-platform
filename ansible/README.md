@@ -60,6 +60,12 @@ This directory owns the post-install host baseline and guest bootstrap for `mick
 - `playbooks/build-brimstone-vm.yml`
   - bootstrap the `mickey-brimstone` build guest with the same Ubuntu 22.04 baseline as `mickey-scarthgap`
   - clone and update only `brimestone` and `Protech` under `~/Projects`
+- `playbooks/google-chrome.yml`
+  - enforce the shared pinned Google Chrome Stable version on all generated `guest_vms`
+  - does not require the Samba or GitHub package secrets used by the full guest bootstraps
+- `playbooks/chrome-devtools-mcp.yml`
+  - enforce pinned Chrome plus the shared `chrome-devtools` Codex MCP server entry on all generated `guest_vms`
+  - installs `/usr/local/bin/mickey-chrome-devtools-mcp` so Thud can use the Acculase Node toolchain while newer guests use the managed Node runtime
 - `playbooks/site.yml`
   - imports the normal Proxmox, infra, and ERP baselines
   - does not run the build guest playbooks automatically because `mickey-thud`, `mickey-scarthgap`, and `mickey-brimstone` are operated explicitly
@@ -78,6 +84,7 @@ Run guest playbooks with both inventories.
 
 - `tasks/bootstrap-vm-base.yml`
   - installs the evaluated VM package layer from `mickey_vm_apt_packages`
+  - installs pinned Google Chrome Stable from Google's apt repository
   - installs the pinned GitHub CLI release from the official `.deb`
   - installs the pinned Herdr release from GitHub into `/usr/local/bin`
   - installs the pinned D2 release from GitHub into `/usr/local/bin`
@@ -86,8 +93,11 @@ Run guest playbooks with both inventories.
 - `tasks/configure-vm-admin-tooling.yml`
   - installs the Consul client when the guest is in `consul_client_vms`
   - installs Codex, PM2, Mermaid CLI, pnpm/Corepack wiring, shared Codex auth wiring, and curated admin dotfiles
+  - installs the Chrome DevTools MCP launcher wrapper and manages the shared MCP server entries
 - `group_vars/all.yml`
   - owns the standard VM package list in `mickey_vm_base_apt_packages`
+  - owns the shared Google Chrome pin in `mickey_google_chrome_version`
+  - owns the shared Codex MCP baseline in `mickey_codex_global_mcp_servers`
 - role group vars add only their extra packages, then expose the full evaluated list through `mickey_vm_apt_packages`.
 
 ## Dotfiles

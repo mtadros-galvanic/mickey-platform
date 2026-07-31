@@ -48,6 +48,29 @@ check "unique_vm_names" {
   }
 }
 
+resource "proxmox_virtual_environment_file" "dhcp_guest_agent_vendor_data" {
+  count = anytrue([
+    for vm in values(local.vm_definitions) : vm.network_mode == "dhcp"
+  ]) ? 1 : 0
+
+  content_type = "snippets"
+  datastore_id = var.cloud_init_snippets_datastore_id
+  node_name    = var.proxmox_node_name
+  overwrite    = true
+
+  source_raw {
+    data      = <<-EOF
+      #cloud-config
+      package_update: true
+      packages:
+        - qemu-guest-agent
+      runcmd:
+        - [systemctl, start, qemu-guest-agent]
+    EOF
+    file_name = "mickey-dhcp-guest-agent.yaml"
+  }
+}
+
 resource "proxmox_virtual_environment_vm" "mickey" {
   for_each = local.vm_definitions
 
@@ -68,6 +91,14 @@ resource "proxmox_virtual_environment_vm" "mickey" {
 
   agent {
     enabled = true
+    timeout = "15m"
+
+    dynamic "wait_for_ip" {
+      for_each = each.value.network_mode == "dhcp" ? [true] : []
+      content {
+        ipv4 = true
+      }
+    }
   }
 
   cpu {
@@ -112,7 +143,8 @@ resource "proxmox_virtual_environment_vm" "mickey" {
   }
 
   initialization {
-    datastore_id = var.cloud_init_datastore_id
+    datastore_id        = var.cloud_init_datastore_id
+    vendor_data_file_id = each.value.network_mode == "dhcp" ? proxmox_virtual_environment_file.dhcp_guest_agent_vendor_data[0].id : null
 
     user_account {
       username = var.vm_admin_user
@@ -127,8 +159,8 @@ resource "proxmox_virtual_environment_vm" "mickey" {
 
     ip_config {
       ipv4 {
-        address = each.value.lan_ipv4_cidr
-        gateway = var.gateway_ipv4
+        address = each.value.network_mode == "dhcp" ? "dhcp" : each.value.lan_ipv4_cidr
+        gateway = each.value.network_mode == "dhcp" ? null : var.gateway_ipv4
       }
     }
   }
@@ -139,14 +171,25 @@ resource "proxmox_virtual_environment_vm" "mickey" {
   }
 }
 
+check "dhcp_guest_agent_ipv4" {
+  assert {
+    condition = alltrue([
+      for host_key, vm in local.vm_definitions :
+      length(try(local.dhcp_ipv4_candidates[host_key], [])) == 1
+      if vm.network_mode == "dhcp"
+    ])
+    error_message = "Every DHCP VM must publish exactly one IPv4 address for its configured guest_agent_interface through the QEMU guest agent."
+  }
+}
+
 resource "local_file" "ansible_inventory" {
-  filename = abspath(var.ansible_inventory_output_path)
+  filename             = abspath(var.ansible_inventory_output_path)
+  directory_permission = "0755"
+  file_permission      = "0644"
   content = templatefile("${path.module}/templates/ansible-inventory.yml.tftpl", {
     hosts                        = local.inventory_hosts
     groups                       = local.inventory_all_groups
     group_names                  = local.inventory_group_names
     ansible_ssh_private_key_file = pathexpand(var.ansible_ssh_private_key_file)
   })
-
-  depends_on = [proxmox_virtual_environment_vm.mickey]
 }

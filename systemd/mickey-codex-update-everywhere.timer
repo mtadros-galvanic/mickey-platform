@@ -4,6 +4,8 @@ Description=Run Mickey Codex updater daily at midnight
 [Timer]
 OnCalendar=*-*-* 00:00:00
 Persistent=true
+RandomizedDelaySec=15m
+AccuracySec=1m
 Unit=mickey-codex-update-everywhere.service
 
 [Install]

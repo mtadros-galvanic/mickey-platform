@@ -3,3 +3,4 @@
 - import_playbook: infra-vm.yml
 - import_playbook: erp-vm.yml
 - import_playbook: utility-vm.yml
+- import_playbook: website-vm.yml

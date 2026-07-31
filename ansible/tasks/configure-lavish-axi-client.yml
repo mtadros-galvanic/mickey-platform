@@ -1,0 +1,26 @@
+---
+- name: Verify the pinned Lavish build is available from persistent tools
+  ansible.builtin.stat:
+    path: "{{ mickey_lavish_axi_client_dir }}/dist/cli.mjs"
+  register: mickey_lavish_axi_client_cli
+  failed_when: not mickey_lavish_axi_client_cli.stat.exists
+
+- name: Install the Lavish launcher on the global PATH
+  ansible.builtin.copy:
+    dest: "{{ mickey_lavish_axi_client_bin_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      exec {{ (mickey_codex_local_bin_dir ~ '/node') | quote }} {{ (mickey_lavish_axi_client_dir ~ '/dist/cli.mjs') | quote }} "$@"
+
+- name: Verify the managed Lavish CLI version
+  ansible.builtin.command:
+    argv:
+      - "{{ mickey_lavish_axi_client_bin_path }}"
+      - --version
+  register: mickey_lavish_axi_client_version
+  changed_when: false
+  failed_when: mickey_lavish_axi_client_version.stdout | trim != mickey_lavish_axi_version

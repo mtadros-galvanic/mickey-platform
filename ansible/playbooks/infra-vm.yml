@@ -542,3 +542,9 @@
       when:
         - mickey_persistent_tools_enable | default(false) | bool
         - mickey_galvanic_ui_enable | default(false) | bool
+
+    - name: Install Lavish into the persistent tools depot
+      ansible.builtin.include_tasks: ../tasks/install-lavish-axi-tool-depot.yml
+      when:
+        - mickey_persistent_tools_enable | default(false) | bool
+        - mickey_lavish_axi_depot_enable | default(false) | bool

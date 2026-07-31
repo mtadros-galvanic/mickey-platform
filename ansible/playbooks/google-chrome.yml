@@ -1,0 +1,10 @@
+---
+- name: Install pinned Google Chrome on Mickey guest VMs
+  hosts: guest_vms
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Install pinned Google Chrome
+      ansible.builtin.include_tasks: ../tasks/install-google-chrome.yml
+      when: mickey_google_chrome_enable | default(false) | bool

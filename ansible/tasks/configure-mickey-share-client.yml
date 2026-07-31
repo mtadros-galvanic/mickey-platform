@@ -1,0 +1,81 @@
+---
+- name: Ensure the Mickey share client package is installed
+  ansible.builtin.apt:
+    name: cifs-utils
+    state: present
+    update_cache: false
+
+- name: Ensure the Mickey share mount point exists
+  ansible.builtin.file:
+    path: "{{ mickey_share_client_mount_path }}"
+    state: directory
+    owner: "{{ mickey_guest_admin_user }}"
+    group: "{{ mickey_guest_admin_user }}"
+    mode: "0770"
+
+- name: Ensure the Mickey share credential directory exists
+  ansible.builtin.file:
+    path: "{{ mickey_share_client_credentials_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the Mickey share credentials
+  ansible.builtin.copy:
+    dest: "{{ mickey_share_client_credentials_path }}"
+    content: |-
+      username={{ mickey_share_client_username }}
+      password={{ mickey_share_client_password }}
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: Persist exactly one Mickey share CIFS automount
+  ansible.builtin.raw: |
+    set -eu
+    mount_point={{ mickey_share_client_mount_path | quote }}
+    line="//{{ mickey_share_client_server }}/{{ mickey_share_client_name }} {{ mickey_share_client_mount_path }} cifs {{ mickey_share_client_fstab_options }} 0 0"
+    tmp="$(mktemp)"
+    trap 'rm -f "$tmp"' EXIT
+
+    current_count="$(awk -v mp="$mount_point" '$2 == mp && ($3 == "cifs" || $3 == "smb3") { count++ } END { print count + 0 }' /etc/fstab)"
+    if grep -Fqx "$line" /etc/fstab && [ "$current_count" -eq 1 ]; then
+      exit 0
+    fi
+
+    awk -v mp="$mount_point" '$2 != mp' /etc/fstab > "$tmp"
+    printf '%s\n' "$line" >> "$tmp"
+    cat "$tmp" > /etc/fstab
+    echo changed
+  register: mickey_share_client_fstab_result
+  changed_when: "'changed' in mickey_share_client_fstab_result.stdout"
+
+- name: Reload systemd after Mickey share fstab changes
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: mickey_share_client_fstab_result.changed
+
+- name: Mount the Mickey share over CIFS
+  ansible.builtin.shell: |
+    set -eu
+    mount_point={{ mickey_share_client_mount_path | quote }}
+    expected_source={{ ('//' ~ mickey_share_client_server ~ '/' ~ mickey_share_client_name) | quote }}
+
+    if mountpoint -q "$mount_point"; then
+      if findmnt -rn -o SOURCE,FSTYPE --target "$mount_point" | awk \
+        -v expected_source="$expected_source" \
+        '$2 == "cifs" && $1 == expected_source { found = 1 } END { exit found ? 0 : 1 }'
+      then
+        exit 0
+      fi
+      umount "$mount_point" || umount -l "$mount_point"
+    fi
+
+    mount "$mount_point"
+    echo changed
+  args:
+    executable: /bin/bash
+  register: mickey_share_client_mount_result
+  changed_when: "'changed' in mickey_share_client_mount_result.stdout"

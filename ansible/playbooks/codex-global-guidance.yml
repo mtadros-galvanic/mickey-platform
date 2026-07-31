@@ -1,0 +1,13 @@
+---
+- name: Deploy managed global Codex guidance to Mickey guests
+  hosts: guest_vms
+  become: true
+  gather_facts: false
+
+  vars:
+    ansible_python_interpreter: "{{ '/opt/mickey-python/cpython-3.12.13+20260610/bin/python3.12' if inventory_hostname == 'mickey-thud' else '/usr/bin/python3' }}"
+
+  tasks:
+    - name: Configure the managed global Codex guidance
+      ansible.builtin.include_tasks: ../tasks/configure-codex-global-guidance.yml
+      when: mickey_codex_enable | default(false) | bool

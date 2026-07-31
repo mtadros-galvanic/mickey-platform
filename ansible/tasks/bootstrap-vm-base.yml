@@ -56,6 +56,10 @@
     apt-get -o Acquire::ForceIPv4=true install -y {{ mickey_vm_apt_packages | join(' ') }}
   when: mickey_vm_base_package_install_method == 'raw'
 
+- name: Install pinned Google Chrome in the VM base layer
+  ansible.builtin.include_tasks: ../tasks/install-google-chrome.yml
+  when: mickey_google_chrome_enable | default(false) | bool
+
 - name: Install GitHub CLI in the VM base layer
   ansible.builtin.include_tasks: ../tasks/install-github-cli.yml
 

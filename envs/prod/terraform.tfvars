@@ -150,4 +150,20 @@ vms = {
     on_boot             = true
     tags                = ["ubuntu-26"]
   }
+
+  "mickey-galvanic-website" = {
+    clone_template_name   = "ubuntu-26-04-server-cloudinit"
+    role                  = "website"
+    consul_client         = true
+    network_mode          = "dhcp"
+    guest_agent_interface = "eth0"
+    vm_id                 = 710
+    cpu_cores             = 4
+    memory_mb             = 12288
+    memory_balloon_mb     = 8192
+    os_disk_gb            = 120
+    started               = true
+    on_boot               = true
+    tags                  = ["ubuntu-26", "wordpress", "development"]
+  }
 }

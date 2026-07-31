@@ -209,8 +209,8 @@
     data_dir = "{{ mickey_consul_data_dir_effective }}"
     server = false
     node_name = "{{ inventory_hostname }}"
-    bind_addr = "{{ ansible_host | default(inventory_hostname) }}"
-    advertise_addr = "{{ ansible_host | default(inventory_hostname) }}"
+    bind_addr = {{ (('{{ GetInterfaceIP "' ~ (mickey_guest_agent_interface | default('eth0')) ~ '" }}') if (mickey_network_mode | default('static')) == 'dhcp' else (ansible_host | default(inventory_hostname))) | to_json }}
+    advertise_addr = {{ (('{{ GetInterfaceIP "' ~ (mickey_guest_agent_interface | default('eth0')) ~ '" }}') if (mickey_network_mode | default('static')) == 'dhcp' else (ansible_host | default(inventory_hostname))) | to_json }}
     client_addr = "127.0.0.1"
     retry_join = ["{{ mickey_consul_server_address_effective }}"]
     leave_on_terminate = true
@@ -233,6 +233,69 @@
   notify:
     - Validate Consul client config
     - Restart Consul client
+
+- name: Watch systemd-networkd leases for DHCP address changes
+  ansible.builtin.raw: |
+    set -eu
+    changed=0
+
+    write_unit() {
+      target="$1"
+      tmp="$(mktemp)"
+      cat > "$tmp"
+      if [ ! -f "$target" ] || ! cmp -s "$tmp" "$target"; then
+        install -D -m 0644 -o root -g root "$tmp" "$target"
+        changed=1
+      fi
+      rm -f "$tmp"
+    }
+
+    write_unit /etc/systemd/system/mickey-consul-address-watch.service <<'EOF'
+    [Unit]
+    Description=Restart Consul after a DHCP lease change
+    After=network-online.target
+
+    [Service]
+    Type=oneshot
+    ExecStart=/bin/systemctl try-restart consul.service
+    EOF
+
+    write_unit /etc/systemd/system/mickey-consul-address-watch.path <<'EOF'
+    [Unit]
+    Description=Watch systemd-networkd DHCP leases for Consul
+
+    [Path]
+    PathChanged=/run/systemd/netif/leases
+    Unit=mickey-consul-address-watch.service
+
+    [Install]
+    WantedBy=multi-user.target
+    EOF
+
+    if [ "$changed" -eq 1 ]; then
+      systemctl daemon-reload
+      echo changed
+    fi
+    systemctl enable --now mickey-consul-address-watch.path >/dev/null
+  register: mickey_consul_address_watch_result
+  changed_when: "'changed' in mickey_consul_address_watch_result.stdout"
+  when: (mickey_network_mode | default('static')) == 'dhcp'
+
+- name: Remove the DHCP address watcher from static Consul clients
+  ansible.builtin.raw: |
+    set -eu
+    service=/etc/systemd/system/mickey-consul-address-watch.service
+    path=/etc/systemd/system/mickey-consul-address-watch.path
+    if [ ! -e "$service" ] && [ ! -e "$path" ]; then
+      exit 0
+    fi
+    systemctl disable --now mickey-consul-address-watch.path >/dev/null 2>&1 || true
+    rm -f "$service" "$path"
+    systemctl daemon-reload
+    echo changed
+  register: mickey_consul_address_watch_absent_result
+  changed_when: "'changed' in mickey_consul_address_watch_absent_result.stdout"
+  when: (mickey_network_mode | default('static')) != 'dhcp'
 
 - name: Flush Consul client handlers before enabling the service
   ansible.builtin.meta: flush_handlers

@@ -21,12 +21,27 @@ locals {
     for vm in values(local.vm_definitions) : vm.clone_template_name
   ])
 
+  dhcp_ipv4_candidates = {
+    for host_key, vm in local.vm_definitions :
+    host_key => flatten([
+      for interface_index, interface_name in proxmox_virtual_environment_vm.mickey[host_key].network_interface_names :
+      interface_name == vm.guest_agent_interface ? [
+        for address in try(proxmox_virtual_environment_vm.mickey[host_key].ipv4_addresses[interface_index], []) :
+        address
+        if address != "127.0.0.1" && !startswith(address, "169.254.")
+      ] : []
+    ])
+    if vm.network_mode == "dhcp"
+  }
+
   inventory_hosts = {
     for host_key, vm in local.vm_definitions :
     host_key => {
-      ansible_host = split("/", vm.lan_ipv4_cidr)[0]
-      ansible_user = var.vm_admin_user
-      role         = vm.role
+      ansible_host          = vm.network_mode == "dhcp" ? one(local.dhcp_ipv4_candidates[host_key]) : split("/", vm.lan_ipv4_cidr)[0]
+      ansible_user          = var.vm_admin_user
+      role                  = vm.role
+      network_mode          = vm.network_mode
+      guest_agent_interface = vm.guest_agent_interface
     }
   }
 

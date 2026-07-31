@@ -1,0 +1,20 @@
+---
+- name: Configure Chrome DevTools MCP on Mickey guest VMs
+  hosts: guest_vms
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Ensure pinned Google Chrome is present
+      ansible.builtin.include_tasks: ../tasks/install-google-chrome.yml
+      when: mickey_google_chrome_enable | default(false) | bool
+
+    - name: Install the Chrome DevTools MCP wrapper
+      ansible.builtin.include_tasks: ../tasks/install-chrome-devtools-mcp-wrapper.yml
+      when: mickey_codex_enable | default(false) | bool
+
+    - name: Apply Codex MCP server entries
+      ansible.builtin.include_tasks: ../tasks/apply-codex-mcp-servers.yml
+      when:
+        - mickey_codex_enable | default(false) | bool
+        - (mickey_codex_global_mcp_servers | default([]) | length) > 0

@@ -11,6 +11,10 @@
   ansible.builtin.include_tasks: ../tasks/configure-codex-auth.yml
   when: mickey_vm_base_configure_codex_auth | bool
 
+- name: Configure the managed global Codex guidance
+  ansible.builtin.include_tasks: ../tasks/configure-codex-global-guidance.yml
+  when: mickey_codex_enable | default(false) | bool
+
 - name: Install the curated admin dotfiles on the VM
   ansible.builtin.include_tasks: ../tasks/configure-admin-dotfiles.yml
   when: mickey_vm_base_configure_dotfiles | bool

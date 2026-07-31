@@ -1,0 +1,12 @@
+---
+- name: Publish Lavish through the Mickey persistent tools depot
+  hosts: infra_vms
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Install Lavish into the persistent tools depot
+      ansible.builtin.include_tasks: ../tasks/install-lavish-axi-tool-depot.yml
+      when:
+        - mickey_persistent_tools_enable | default(false) | bool
+        - mickey_lavish_axi_depot_enable | default(false) | bool

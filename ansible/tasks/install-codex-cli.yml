@@ -569,14 +569,14 @@
         CODEX_INSTALL_DIR={{ mickey_codex_standalone_bin_dir | quote }} \
         CODEX_NON_INTERACTIVE=true \
         PATH={{ mickey_codex_standalone_bin_dir | quote }}:/usr/local/bin:/usr/bin:/bin \
-        setsid sh "$installer" $release_arg </dev/null
+        sh "$installer" $release_arg </dev/null
     else
       sudo -H -u {{ mickey_guest_admin_user | quote }} env \
         CODEX_HOME={{ mickey_codex_local_home | quote }} \
         CODEX_INSTALL_DIR={{ mickey_codex_standalone_bin_dir | quote }} \
         CODEX_NON_INTERACTIVE=true \
         PATH={{ mickey_codex_standalone_bin_dir | quote }}:/usr/local/bin:/usr/bin:/bin \
-        setsid sh "$installer" $release_arg </dev/null
+        sh "$installer" $release_arg </dev/null
     fi
 
     after_path="$(resolve_codex_bin 2>/dev/null || true)"
@@ -616,7 +616,12 @@
     export CODEX_INSTALL_DIR={{ mickey_codex_standalone_bin_dir | quote }}
     export CODEX_NON_INTERACTIVE=true
     export PATH={{ mickey_codex_standalone_bin_dir | quote }}:/usr/local/bin:/usr/bin:/bin
-    setsid sh "$installer" </dev/null
+    release_arg=""
+    requested_version={{ mickey_codex_version | default('') | quote }}
+    if [ -n "$requested_version" ]; then
+      release_arg="--release $requested_version"
+    fi
+    sh "$installer" $release_arg </dev/null
     codex --version
     EOF
 
@@ -684,6 +689,10 @@
     echo changed
   register: mickey_codex_wrapper_result
   changed_when: "'changed' in mickey_codex_wrapper_result.stdout"
+  when: mickey_codex_enable | default(false) | bool
+
+- name: Install the Chrome DevTools MCP wrapper
+  ansible.builtin.include_tasks: ../tasks/install-chrome-devtools-mcp-wrapper.yml
   when: mickey_codex_enable | default(false) | bool
 
 - name: Export CODEX_HOME for login shells

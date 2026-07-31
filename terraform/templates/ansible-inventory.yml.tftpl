@@ -9,6 +9,8 @@ all:
           ansible_ssh_private_key_file: ${ansible_ssh_private_key_file}
           ansible_ssh_common_args: -o IdentitiesOnly=yes
           mickey_vm_role: ${host.role}
+          mickey_network_mode: ${host.network_mode}
+          mickey_guest_agent_interface: ${host.guest_agent_interface}
 %{ endfor ~}
 %{ for group_name in group_names ~}
     ${group_name}:

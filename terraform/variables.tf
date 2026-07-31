@@ -20,6 +20,18 @@ variable "proxmox_node_name" {
   type        = string
 }
 
+variable "proxmox_ssh_username" {
+  description = "PAM account used for Proxmox operations that require SFTP, such as uploading cloud-init snippets."
+  type        = string
+  default     = "root"
+}
+
+variable "proxmox_ssh_private_key_file" {
+  description = "Private key used for Proxmox SFTP operations."
+  type        = string
+  default     = "~/.ssh/mickey"
+}
+
 variable "vm_bridge" {
   description = "Bridge name used by guest network devices."
   type        = string
@@ -34,6 +46,12 @@ variable "fast_datastore_id" {
 variable "cloud_init_datastore_id" {
   description = "Datastore used for cloud-init media."
   type        = string
+}
+
+variable "cloud_init_snippets_datastore_id" {
+  description = "Snippet-capable datastore used for custom cloud-init vendor data."
+  type        = string
+  default     = "bulk"
 }
 
 variable "bulk_datastore_id" {
@@ -103,20 +121,22 @@ variable "ansible_ssh_private_key_file" {
 variable "vms" {
   description = "Guest VM definitions keyed by guest name."
   type = map(object({
-    clone_template_name  = string
-    role                 = string
-    consul_client        = optional(bool, false)
-    vm_id                = number
-    cpu_cores            = number
-    memory_mb            = number
-    memory_balloon_mb    = optional(number)
-    os_disk_gb           = number
-    os_disk_datastore_id = optional(string)
-    os_disk_iothread     = optional(bool)
-    lan_ipv4_cidr        = string
-    started              = optional(bool, true)
-    on_boot              = optional(bool, true)
-    tags                 = optional(list(string), [])
+    clone_template_name   = string
+    role                  = string
+    consul_client         = optional(bool, false)
+    network_mode          = optional(string, "static")
+    guest_agent_interface = optional(string, "eth0")
+    vm_id                 = number
+    cpu_cores             = number
+    memory_mb             = number
+    memory_balloon_mb     = optional(number)
+    os_disk_gb            = number
+    os_disk_datastore_id  = optional(string)
+    os_disk_iothread      = optional(bool)
+    lan_ipv4_cidr         = optional(string)
+    started               = optional(bool, true)
+    on_boot               = optional(bool, true)
+    tags                  = optional(list(string), [])
     extra_disks = optional(list(object({
       datastore_id = string
       interface    = string
@@ -129,4 +149,30 @@ variable "vms" {
       usb3    = optional(bool)
     })), [])
   }))
+
+  validation {
+    condition = alltrue([
+      for vm in values(var.vms) :
+      contains(["static", "dhcp"], vm.network_mode)
+    ])
+    error_message = "Each VM network_mode must be either 'static' or 'dhcp'."
+  }
+
+  validation {
+    condition = alltrue([
+      for vm in values(var.vms) :
+      vm.network_mode == "dhcp"
+      ? vm.lan_ipv4_cidr == null
+      : try(length(trimspace(vm.lan_ipv4_cidr)) > 0, false)
+    ])
+    error_message = "Static VMs require lan_ipv4_cidr; DHCP VMs must omit it."
+  }
+
+  validation {
+    condition = alltrue([
+      for vm in values(var.vms) :
+      vm.network_mode != "dhcp" || vm.started
+    ])
+    error_message = "DHCP VMs must start during initial provisioning so the QEMU guest agent can publish their address."
+  }
 }

@@ -69,6 +69,10 @@
   register: mickey_persistent_tools_mount_result
   changed_when: "'changed' in mickey_persistent_tools_mount_result.stdout"
 
+- name: Configure the Lavish CLI from persistent tools
+  ansible.builtin.include_tasks: ../tasks/configure-lavish-axi-client.yml
+  when: mickey_lavish_axi_client_enable | default(false) | bool
+
 - name: Export persistent tools environment for login shells
   ansible.builtin.copy:
     dest: "{{ mickey_persistent_tools_profile_script_path }}"

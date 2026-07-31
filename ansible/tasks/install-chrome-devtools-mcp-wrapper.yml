@@ -1,0 +1,20 @@
+---
+- name: Install the Chrome DevTools MCP launcher wrapper
+  ansible.builtin.raw: |
+    set -eu
+    tmp="$(mktemp)"
+    cat > "$tmp" <<'EOF'
+    {{ lookup('ansible.builtin.template', (mickey_ansible_root | default(playbook_dir ~ '/..')) ~ '/templates/mickey-chrome-devtools-mcp.sh.j2') }}
+    EOF
+
+    if [ -f {{ mickey_codex_chrome_devtools_mcp_wrapper_path | quote }} ] && cmp -s "$tmp" {{ mickey_codex_chrome_devtools_mcp_wrapper_path | quote }}; then
+      rm -f "$tmp"
+      exit 0
+    fi
+
+    install -D -m 0755 -o root -g root "$tmp" {{ mickey_codex_chrome_devtools_mcp_wrapper_path | quote }}
+    rm -f "$tmp"
+    echo changed
+  register: mickey_chrome_devtools_mcp_wrapper_result
+  changed_when: "'changed' in mickey_chrome_devtools_mcp_wrapper_result.stdout"
+  when: mickey_codex_enable | default(false) | bool

@@ -11,7 +11,7 @@ This repo uses one SOPS-managed secret file per environment.
 
 ## Structure
 
-The secrets file is split into three namespaces:
+The secrets file is split into namespaces:
 
 - `terraform`
   - Proxmox API endpoint and token
@@ -24,6 +24,8 @@ The secrets file is split into three namespaces:
 - `github`
   - GitHub Packages token for Galvanic npm package access
   - GitHub CLI token for repository and issue access from managed guests
+- `hetzner`
+  - Hetzner account password
 
 ## Workflow
 

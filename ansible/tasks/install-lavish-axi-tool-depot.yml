@@ -1,0 +1,115 @@
+---
+- name: Ensure the Lavish tool depot directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ mickey_guest_admin_user }}"
+    group: "{{ mickey_guest_admin_user }}"
+    mode: "0755"
+  loop:
+    - "{{ mickey_persistent_tools_export_path }}"
+    - "{{ mickey_lavish_axi_pnpm_store_dir }}"
+
+- name: Ensure GitHub is trusted for Lavish SSH access
+  ansible.builtin.raw: |
+    set -eu
+    install -d -m 0700 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} {{ (mickey_guest_admin_home ~ '/.ssh') | quote }}
+    touch {{ (mickey_guest_admin_home ~ '/.ssh/known_hosts') | quote }}
+    chown {{ mickey_guest_admin_user | quote }}:{{ mickey_guest_admin_user | quote }} {{ (mickey_guest_admin_home ~ '/.ssh/known_hosts') | quote }}
+    chmod 0600 {{ (mickey_guest_admin_home ~ '/.ssh/known_hosts') | quote }}
+    if ! ssh-keygen -F github.com -f {{ (mickey_guest_admin_home ~ '/.ssh/known_hosts') | quote }} >/dev/null 2>&1; then
+      ssh-keyscan -H github.com >> {{ (mickey_guest_admin_home ~ '/.ssh/known_hosts') | quote }}
+      chown {{ mickey_guest_admin_user | quote }}:{{ mickey_guest_admin_user | quote }} {{ (mickey_guest_admin_home ~ '/.ssh/known_hosts') | quote }}
+    fi
+  changed_when: false
+
+- name: Clone and build Lavish in the persistent tools depot
+  ansible.builtin.raw: |
+    set -eu
+    repo={{ mickey_lavish_axi_repo_url | quote }}
+    ref={{ mickey_lavish_axi_ref | quote }}
+    dest={{ mickey_lavish_axi_export_dir | quote }}
+    store={{ mickey_lavish_axi_pnpm_store_dir | quote }}
+    owner={{ mickey_guest_admin_user | quote }}
+    ssh_key={{ (mickey_guest_admin_home ~ '/.ssh/mt-github') | quote }}
+    node_bin={{ (mickey_codex_local_bin_dir ~ '/node') | quote }}
+    pnpm_bin={{ (mickey_codex_local_bin_dir ~ '/pnpm') | quote }}
+    state_dir={{ (mickey_persistent_tools_export_path ~ '/.state') | quote }}
+    marker="$state_dir/lavish-axi-build-commit"
+    changed=0
+
+    if [ ! -x "$node_bin" ]; then
+      echo "missing Node runtime at $node_bin" >&2
+      exit 1
+    fi
+
+    if [ ! -x "$pnpm_bin" ]; then
+      echo "missing pnpm runtime at $pnpm_bin" >&2
+      exit 1
+    fi
+
+    if [ ! -f "$ssh_key" ]; then
+      echo "missing GitHub SSH key at $ssh_key" >&2
+      exit 1
+    fi
+
+    install -d -m 0755 -o "$owner" -g "$owner" "$(dirname "$dest")" "$store" "$state_dir"
+
+    run_as_admin() {
+      sudo -H -u "$owner" env \
+        HOME={{ mickey_guest_admin_home | quote }} \
+        PATH={{ mickey_codex_local_bin_dir | quote }}:/usr/local/bin:/usr/bin:/bin \
+        GIT_SSH_COMMAND="ssh -i $ssh_key -o BatchMode=yes -o StrictHostKeyChecking=accept-new" \
+        COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
+        "$@"
+    }
+
+    run_as_admin_in_repo() {
+      sudo -H -u "$owner" env \
+        HOME={{ mickey_guest_admin_home | quote }} \
+        PATH={{ mickey_codex_local_bin_dir | quote }}:/usr/local/bin:/usr/bin:/bin \
+        GIT_SSH_COMMAND="ssh -i $ssh_key -o BatchMode=yes -o StrictHostKeyChecking=accept-new" \
+        COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
+        bash -lc 'cd "$1" && shift && "$@"' bash "$dest" "$@"
+    }
+
+    if [ ! -d "$dest/.git" ]; then
+      rm -rf "$dest"
+      run_as_admin git clone "$repo" "$dest"
+      changed=1
+    fi
+
+    before="$(cd "$dest" && git rev-parse HEAD 2>/dev/null || true)"
+    run_as_admin git -C "$dest" fetch origin
+    run_as_admin git -C "$dest" checkout --detach "$ref"
+    after="$(cd "$dest" && git rev-parse HEAD)"
+
+    if [ "$before" != "$after" ]; then
+      changed=1
+    fi
+
+    built="$(cat "$marker" 2>/dev/null || true)"
+    if [ "$built" != "$after" ] || [ ! -x "$dest/dist/cli.mjs" ] || [ ! -d "$dest/node_modules/express" ]; then
+      run_as_admin_in_repo "$pnpm_bin" install --frozen-lockfile --store-dir "$store"
+      run_as_admin_in_repo "$pnpm_bin" build
+      chmod 0755 "$dest/dist/cli.mjs"
+      printf '%s\n' "$after" > "$marker"
+      chown "$owner:$owner" "$marker"
+      changed=1
+    fi
+
+    test -x "$dest/dist/cli.mjs"
+    test -d "$dest/node_modules/express"
+    version="$(run_as_admin "$node_bin" "$dest/dist/cli.mjs" --version)"
+    if [ "$version" != {{ mickey_lavish_axi_version | quote }} ]; then
+      echo "expected Lavish {{ mickey_lavish_axi_version }}, found $version" >&2
+      exit 1
+    fi
+
+    if [ "$changed" -eq 1 ]; then
+      echo changed
+    fi
+  args:
+    executable: /bin/bash
+  register: mickey_lavish_axi_depot_result
+  changed_when: "'changed' in mickey_lavish_axi_depot_result.stdout"

@@ -1,0 +1,22 @@
+mickey_website_extra_apt_packages:
+  - cifs-utils
+  - docker.io
+  - docker-compose-v2
+  - make
+mickey_website_apt_packages: "{{ (mickey_vm_base_apt_packages + mickey_website_extra_apt_packages) | unique }}"
+mickey_vm_apt_packages: "{{ mickey_website_apt_packages }}"
+
+mickey_website_repo_url: https://github.com/GalvanicAppliedSciences/galvanic-website.git
+mickey_website_projects_root: "/home/{{ mickey_guest_admin_user }}/Projects"
+mickey_website_repo_dir: "{{ mickey_website_projects_root }}/galvanic-website"
+
+mickey_website_share_mount_path: "{{ mickey_shared_mount_path }}"
+mickey_website_share_name: mickey-share
+mickey_website_share_server: "{{ hostvars['mickey-infra'].ansible_host | default('10.25.1.206') }}"
+mickey_website_share_credentials_path: /etc/mickey-platform/mickey-infra-share.credentials
+mickey_website_share_fstab_options: "credentials={{ mickey_website_share_credentials_path }},uid={{ mickey_guest_admin_user }},gid={{ mickey_guest_admin_user }},vers=3.0,file_mode=0660,dir_mode=0770,mfsymlinks,_netdev,nofail,x-systemd.automount"
+mickey_website_fast_share_mount_path: "{{ mickey_fast_shared_mount_path }}"
+
+mickey_google_chrome_enable: false
+mickey_codex_enable: true
+mickey_lavish_axi_client_enable: true

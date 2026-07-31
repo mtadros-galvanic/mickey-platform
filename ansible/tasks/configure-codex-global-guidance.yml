@@ -1,0 +1,38 @@
+---
+- name: Ensure the local Codex home exists for global guidance
+  ansible.builtin.file:
+    path: "{{ mickey_codex_local_home }}"
+    state: directory
+    owner: "{{ mickey_guest_admin_user }}"
+    group: "{{ mickey_guest_admin_user }}"
+    mode: "0700"
+
+- name: Inspect the current global AGENTS.md
+  ansible.builtin.stat:
+    path: "{{ mickey_codex_local_home }}/AGENTS.md"
+  register: mickey_codex_global_agents_file
+
+- name: Remove the exact legacy global engineering block
+  ansible.builtin.replace:
+    path: "{{ mickey_codex_local_home }}/AGENTS.md"
+    regexp: |-
+      \A# Global Codex Guidance
+
+      ## Engineering Priorities
+
+      - Never choose the fastest fix merely because it is fast\. Prefer long-term, simple, maintainable, best-practice solutions over ad hoc patches\.
+      - Before changing infrastructure, auth, deployment, networking, storage, or security behavior, identify the existing constraints and preserve them unless the user explicitly approves a tradeoff\.
+      - If the correct fix requires external access, credentials, or a control-plane setting that is unavailable, stop and explain the blocker instead of substituting a broad workaround\.
+      - For urgent issues, still use the smallest durable fix that preserves known constraints; do not treat urgency as permission to reintroduce previous problems\.
+    replace: ""
+  when: mickey_codex_global_agents_file.stat.exists
+
+- name: Record the managed Mickey guidance in global AGENTS.md
+  ansible.builtin.blockinfile:
+    path: "{{ mickey_codex_local_home }}/AGENTS.md"
+    create: true
+    owner: "{{ mickey_guest_admin_user }}"
+    group: "{{ mickey_guest_admin_user }}"
+    mode: "0644"
+    marker: "<!-- {mark} Mickey managed global guidance -->"
+    block: "{{ lookup('ansible.builtin.file', (mickey_ansible_root | default(playbook_dir ~ '/..')) ~ '/files/codex/global-AGENTS.md') }}"
