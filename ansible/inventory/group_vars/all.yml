@@ -153,8 +153,12 @@ mickey_codex_global_mcp_servers:
       - "--no-usage-statistics"
       - "--executablePath=/usr/bin/google-chrome-stable"
       - "--isolated"
+mickey_codex_global_mcp_servers_remove: []
 mickey_codex_version: ""
 mickey_codex_enable: true
+mickey_codex_update_timer_enable: true
+mickey_codex_update_timer_host: mickey-controller
+mickey_codex_update_units_dir: "{{ mickey_guest_admin_home }}/Projects/mickey/mickey-platform/systemd"
 
 mickey_pnpm_enable: true
 mickey_pnpm_version: "11.5.2"

@@ -260,6 +260,18 @@ if [ -x "$codex_bin" ]; then
   [ -n "$after" ] || after="unknown"
 fi
 printf 'MICKEY_CODEX_AFTER\t%s\n' "$after"
+
+releases_dir="$HOME/.local/state/codex/home/packages/standalone/releases"
+current_link="$HOME/.local/state/codex/home/packages/standalone/current"
+if [ -d "$releases_dir" ]; then
+  current_target="$(basename "$(readlink "$current_link" 2>/dev/null || true)" 2>/dev/null || true)"
+  ls -1 "$releases_dir" 2>/dev/null | sort -V | head -n -3 | while IFS= read -r old_release; do
+    [ -n "$old_release" ] || continue
+    [ "$old_release" != "$current_target" ] || continue
+    rm -rf "$releases_dir/${old_release:?}"
+  done
+fi
+
 [ "$after" = "$requested_release" ]
 EOF
 }

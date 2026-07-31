@@ -617,7 +617,7 @@
     export CODEX_NON_INTERACTIVE=true
     export PATH={{ mickey_codex_standalone_bin_dir | quote }}:/usr/local/bin:/usr/bin:/bin
     release_arg=""
-    requested_version={{ mickey_codex_version | default('') | quote }}
+    requested_version="${CODEX_RELEASE:-{{ mickey_codex_version | default('') }}}"
     if [ -n "$requested_version" ]; then
       release_arg="--release $requested_version"
     fi

@@ -111,6 +111,10 @@
     - name: Apply the shared VM admin tooling layer to the utility guest
       ansible.builtin.include_tasks: ../tasks/configure-vm-admin-tooling.yml
 
+    - name: Install the Codex fleet update timer on the controller
+      ansible.builtin.include_tasks: ../tasks/install-codex-update-timer.yml
+      when: mickey_codex_update_timer_enable | default(false) | bool
+
     - name: Publish fd on PATH for Ubuntu guests
       ansible.builtin.file:
         src: /usr/bin/fdfind
