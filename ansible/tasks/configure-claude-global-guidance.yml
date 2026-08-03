@@ -1,0 +1,20 @@
+---
+- name: Ensure the Claude config directory exists for guidance
+  ansible.builtin.file:
+    path: "{{ mickey_claude_config_dir }}"
+    state: directory
+    owner: "{{ mickey_guest_admin_user }}"
+    group: "{{ mickey_guest_admin_user }}"
+    mode: "0700"
+  when: mickey_claude_enable | default(false) | bool
+
+- name: Record the managed global Claude guidance
+  ansible.builtin.blockinfile:
+    path: "{{ mickey_claude_config_dir }}/CLAUDE.md"
+    marker: "<!-- {mark} Mickey managed global guidance -->"
+    block: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/../files/claude/global-CLAUDE.md') }}"
+    create: true
+    owner: "{{ mickey_guest_admin_user }}"
+    group: "{{ mickey_guest_admin_user }}"
+    mode: "0644"
+  when: mickey_claude_enable | default(false) | bool

@@ -1,0 +1,20 @@
+---
+- name: Provision Claude Code on Mickey guests
+  hosts: guest_vms:!mickey-thud
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Install the Claude Code CLI
+      ansible.builtin.include_tasks: ../tasks/install-claude-cli.yml
+
+    - name: Configure shared Claude auth and skills
+      ansible.builtin.include_tasks: ../tasks/configure-claude-auth.yml
+
+    - name: Configure the managed global Claude guidance
+      ansible.builtin.include_tasks: ../tasks/configure-claude-global-guidance.yml
+      when: mickey_claude_enable | default(false) | bool
+
+    - name: Install the Claude fleet update timer on the controller
+      ansible.builtin.include_tasks: ../tasks/install-claude-update-timer.yml
+      when: mickey_claude_update_timer_enable | default(false) | bool

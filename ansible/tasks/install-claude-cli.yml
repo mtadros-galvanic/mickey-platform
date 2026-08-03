@@ -1,0 +1,210 @@
+---
+- name: Ensure the Claude local directories exist
+  ansible.builtin.raw: |
+    set -eu
+    install -d -m 0755 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} \
+      {{ mickey_guest_admin_home | quote }}/.local \
+      {{ mickey_claude_local_bin_dir | quote }} \
+      {{ mickey_guest_admin_home | quote }}/.local/lib \
+      {{ mickey_claude_wrapper_lib_dir | quote }}
+    install -d -m 0700 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} \
+      {{ mickey_claude_config_dir | quote }}
+  changed_when: false
+  when: mickey_claude_enable | default(false) | bool
+
+- name: Install the Claude Code CLI for the guest user
+  ansible.builtin.raw: |
+    set -eu
+    launcher={{ mickey_claude_launcher_path | quote }}
+    requested_version={{ mickey_claude_version | default('') | quote }}
+
+    current_version=""
+    if [ -x "$launcher" ]; then
+      current_version="$(sudo -H -u {{ mickey_guest_admin_user | quote }} env DISABLE_AUTOUPDATER=1 "$launcher" --version 2>/dev/null | awk '{print $1}' || true)"
+    fi
+
+    if [ -n "$current_version" ]; then
+      if [ -z "$requested_version" ] || [ "$current_version" = "$requested_version" ]; then
+        exit 0
+      fi
+    fi
+
+    installer="$(mktemp)"
+    trap 'rm -f "$installer"' EXIT
+    curl -fsSL {{ mickey_claude_install_script_url | quote }} -o "$installer"
+    chmod 0755 "$installer"
+    if [ -n "$requested_version" ]; then
+      sudo -H -u {{ mickey_guest_admin_user | quote }} env HOME={{ mickey_guest_admin_home | quote }} DISABLE_AUTOUPDATER=1 \
+        bash "$installer" "$requested_version" </dev/null
+    else
+      sudo -H -u {{ mickey_guest_admin_user | quote }} env HOME={{ mickey_guest_admin_home | quote }} DISABLE_AUTOUPDATER=1 \
+        bash "$installer" </dev/null
+    fi
+
+    installed={{ mickey_claude_wrapper_path | quote }}
+    if [ -e "$installed" ] && ! head -n 2 "$installed" 2>/dev/null | grep -q mickey-managed; then
+      if [ -L "$installed" ]; then
+        ln -sfn "$(readlink -f "$installed")" "$launcher"
+        rm -f "$installed"
+      else
+        mv -f "$installed" "$launcher"
+      fi
+      chown -h {{ mickey_guest_admin_user | quote }}:{{ mickey_guest_admin_user | quote }} "$launcher" || true
+    fi
+
+    test -e "$launcher"
+    echo changed
+  register: mickey_claude_cli_result
+  changed_when: "'changed' in mickey_claude_cli_result.stdout"
+  when: mickey_claude_enable | default(false) | bool
+
+- name: Install the canonical Claude wrapper source
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/claude-wrapper.sh.j2"
+    dest: "{{ mickey_claude_wrapper_source_path }}"
+    owner: "{{ mickey_guest_admin_user }}"
+    group: "{{ mickey_guest_admin_user }}"
+    mode: "0755"
+  when: mickey_claude_enable | default(false) | bool
+
+- name: Activate the Claude wrapper
+  ansible.builtin.raw: |
+    set -eu
+    wrapper={{ mickey_claude_wrapper_path | quote }}
+    wrapper_source={{ mickey_claude_wrapper_source_path | quote }}
+    if [ -f "$wrapper" ] && cmp -s "$wrapper_source" "$wrapper"; then
+      exit 0
+    fi
+    install -m 0755 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} \
+      "$wrapper_source" "$wrapper"
+    echo changed
+  register: mickey_claude_wrapper_result
+  changed_when: "'changed' in mickey_claude_wrapper_result.stdout"
+  when: mickey_claude_enable | default(false) | bool
+
+- name: Publish the Claude wrapper on the global PATH
+  ansible.builtin.raw: |
+    set -eu
+    target={{ mickey_claude_wrapper_path | quote }}
+    link={{ mickey_claude_global_bin_path | quote }}
+    if [ "$(readlink "$link" 2>/dev/null || true)" = "$target" ]; then
+      exit 0
+    fi
+    ln -sfn "$target" "$link"
+    echo changed
+  register: mickey_claude_global_bin_result
+  changed_when: "'changed' in mickey_claude_global_bin_result.stdout"
+  when: mickey_claude_enable | default(false) | bool
+
+- name: Install the Claude update helper
+  ansible.builtin.raw: |
+    set -eu
+    tmp="$(mktemp)"
+    cat > "$tmp" <<'EOF'
+    #!/bin/sh
+    set -eu
+
+    if [ "$(id -un)" != "{{ mickey_guest_admin_user }}" ]; then
+      echo "claude-update must run as {{ mickey_guest_admin_user }}" >&2
+      exit 1
+    fi
+
+    installer="$(mktemp)"
+    trap 'rm -f "$installer"' EXIT
+    curl -fsSL {{ mickey_claude_install_script_url | quote }} -o "$installer"
+    chmod 0755 "$installer"
+    export DISABLE_AUTOUPDATER=1
+    release="${CLAUDE_RELEASE:-{{ mickey_claude_version | default('') }}}"
+    if [ -n "$release" ]; then
+      bash "$installer" "$release" </dev/null
+    else
+      bash "$installer" </dev/null
+    fi
+
+    installed={{ mickey_claude_wrapper_path | quote }}
+    launcher={{ mickey_claude_launcher_path | quote }}
+    wrapper_source={{ mickey_claude_wrapper_source_path | quote }}
+    if [ -e "$installed" ] && ! head -n 2 "$installed" 2>/dev/null | grep -q mickey-managed; then
+      if [ -L "$installed" ]; then
+        ln -sfn "$(readlink -f "$installed")" "$launcher"
+        rm -f "$installed"
+      else
+        mv -f "$installed" "$launcher"
+      fi
+    fi
+    if [ -f "$wrapper_source" ]; then
+      cp -f "$wrapper_source" "$installed"
+      chmod 0755 "$installed"
+    fi
+    "$launcher" --version
+    EOF
+
+    if [ -f {{ mickey_claude_update_path | quote }} ] && cmp -s "$tmp" {{ mickey_claude_update_path | quote }}; then
+      rm -f "$tmp"
+      exit 0
+    fi
+
+    install -D -m 0755 -o root -g root "$tmp" {{ mickey_claude_update_path | quote }}
+    rm -f "$tmp"
+    echo changed
+  register: mickey_claude_update_helper_result
+  changed_when: "'changed' in mickey_claude_update_helper_result.stdout"
+  when: mickey_claude_enable | default(false) | bool
+
+- name: Install the managed Claude settings
+  ansible.builtin.raw: |
+    set -eu
+    tmp="$(mktemp)"
+    cat > "$tmp" <<'EOF'
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "permissions": {
+        "defaultMode": "bypassPermissions",
+        "allow": [
+          "Bash",
+          "Read",
+          "Edit",
+          "Write",
+          "Glob",
+          "Grep",
+          "WebFetch",
+          "WebSearch",
+          "Agent",
+          "Workflow"
+        ]
+      },
+      "skipDangerousModePermissionPrompt": true,
+      "skipWorkflowUsageWarning": true,
+      "env": {
+        "DISABLE_AUTOUPDATER": "1"
+      }
+    }
+    EOF
+
+    dest={{ (mickey_claude_config_dir ~ '/settings.json') | quote }}
+    if [ -f "$dest" ] && cmp -s "$tmp" "$dest"; then
+      rm -f "$tmp"
+      exit 0
+    fi
+
+    install -m 0600 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} "$tmp" "$dest"
+    rm -f "$tmp"
+    echo changed
+  register: mickey_claude_settings_result
+  changed_when: "'changed' in mickey_claude_settings_result.stdout"
+  when: mickey_claude_enable | default(false) | bool
+
+- name: Seed the Claude onboarding state when missing
+  ansible.builtin.raw: |
+    set -eu
+    dest={{ (mickey_guest_admin_home ~ '/.claude.json') | quote }}
+    if [ -f "$dest" ]; then
+      exit 0
+    fi
+    printf '{\n  "hasCompletedOnboarding": true\n}\n' > "$dest"
+    chown {{ mickey_guest_admin_user | quote }}:{{ mickey_guest_admin_user | quote }} "$dest"
+    chmod 0600 "$dest"
+    echo changed
+  register: mickey_claude_onboarding_result
+  changed_when: "'changed' in mickey_claude_onboarding_result.stdout"
+  when: mickey_claude_enable | default(false) | bool

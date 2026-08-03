@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Mickey Claude updater daily after the Codex updater
+
+[Timer]
+OnCalendar=*-*-* 00:30:00
+Persistent=true
+RandomizedDelaySec=15m
+AccuracySec=1m
+Unit=mickey-claude-update-everywhere.service
+
+[Install]
+WantedBy=timers.target

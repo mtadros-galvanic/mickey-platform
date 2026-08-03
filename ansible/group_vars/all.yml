@@ -160,6 +160,32 @@ mickey_codex_update_timer_enable: true
 mickey_codex_update_timer_host: mickey-controller
 mickey_codex_update_units_dir: "{{ mickey_guest_admin_home }}/Projects/mickey/mickey-platform/systemd"
 
+mickey_vm_base_configure_claude: true
+mickey_vm_base_configure_claude_auth: true
+mickey_claude_enable: true
+mickey_claude_version: ""
+mickey_claude_install_script_url: https://claude.ai/install.sh
+mickey_claude_config_dir: "{{ mickey_guest_admin_home }}/.claude"
+mickey_claude_local_bin_dir: "{{ mickey_guest_admin_home }}/.local/bin"
+mickey_claude_launcher_path: "{{ mickey_claude_local_bin_dir }}/claude-launcher"
+mickey_claude_wrapper_path: "{{ mickey_claude_local_bin_dir }}/claude"
+mickey_claude_wrapper_lib_dir: "{{ mickey_guest_admin_home }}/.local/lib/mickey"
+mickey_claude_wrapper_source_path: "{{ mickey_claude_wrapper_lib_dir }}/claude-wrapper"
+mickey_claude_global_bin_path: /usr/local/bin/claude
+mickey_claude_update_path: /usr/local/bin/claude-update
+mickey_claude_sync_script_path: /usr/local/bin/mickey-claude-sync-auth
+mickey_claude_local_auth_path: "{{ mickey_claude_config_dir }}/.credentials.json"
+mickey_claude_local_auth_backup_path: "{{ mickey_claude_config_dir }}/.credentials.json.local-backup"
+mickey_claude_shared_root: "{{ mickey_fast_shared_mount_path }}/admin/claude"
+mickey_claude_shared_auth_path: "{{ mickey_claude_shared_root }}/credentials.json"
+mickey_claude_shared_skills_path: "{{ mickey_claude_shared_root }}/skills"
+mickey_claude_hosts_root: "{{ mickey_claude_shared_root }}/hosts"
+mickey_claude_private_skills_path: "{{ mickey_claude_hosts_root }}/{{ inventory_hostname }}/skills"
+mickey_claude_shared_auth_enable: true
+mickey_claude_update_timer_enable: true
+mickey_claude_update_timer_host: mickey-controller
+mickey_claude_update_units_dir: "{{ mickey_guest_admin_home }}/Projects/mickey/mickey-platform/systemd"
+
 mickey_pnpm_enable: true
 mickey_pnpm_version: "11.5.2"
 mickey_pnpm_use_corepack_shims: true

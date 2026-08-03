@@ -1,0 +1,183 @@
+---
+- name: Ensure the Claude config directory exists
+  ansible.builtin.raw: |
+    set -eu
+    install -d -m 0700 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} \
+      {{ mickey_claude_config_dir | quote }}
+  changed_when: false
+  when: mickey_claude_enable | default(false) | bool
+
+- name: Install the Claude auth sync helper
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/../templates/mickey-claude-sync-auth.sh.j2"
+    dest: "{{ mickey_claude_sync_script_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - mickey_claude_enable | default(false) | bool
+    - mickey_claude_shared_auth_enable | default(false) | bool
+
+- name: Remove the Claude auth sync helper when shared auth is disabled
+  ansible.builtin.file:
+    path: "{{ mickey_claude_sync_script_path }}"
+    state: absent
+  when:
+    - mickey_claude_enable | default(false) | bool
+    - not (mickey_claude_shared_auth_enable | default(false) | bool)
+
+- name: Probe for the shared Claude auth file
+  ansible.builtin.raw: |
+    if [ -f {{ mickey_claude_shared_auth_path | quote }} ]; then
+      echo present
+    else
+      echo absent
+    fi
+  register: mickey_claude_shared_auth_probe
+  changed_when: false
+  when:
+    - mickey_claude_enable | default(false) | bool
+    - mickey_claude_shared_auth_enable | default(false) | bool
+
+- name: Point the local Claude credentials at the shared copy when available
+  ansible.builtin.raw: |
+    set -eu
+    shared_auth={{ mickey_claude_shared_auth_path | quote }}
+    local_auth={{ mickey_claude_local_auth_path | quote }}
+    backup_auth={{ mickey_claude_local_auth_backup_path | quote }}
+    if [ -L "$local_auth" ] && [ "$(readlink "$local_auth")" = "$shared_auth" ]; then
+      exit 0
+    fi
+    if [ -e "$local_auth" ] && [ ! -L "$local_auth" ]; then
+      if [ ! -e "$backup_auth" ]; then
+        mv "$local_auth" "$backup_auth"
+      else
+        rm -f "$local_auth"
+      fi
+    else
+      rm -f "$local_auth"
+    fi
+    ln -s "$shared_auth" "$local_auth"
+    chown -h {{ mickey_guest_admin_user | quote }}:{{ mickey_guest_admin_user | quote }} "$local_auth" || true
+    echo changed
+  register: mickey_claude_auth_link_result
+  changed_when: "'changed' in mickey_claude_auth_link_result.stdout"
+  when:
+    - mickey_claude_enable | default(false) | bool
+    - mickey_claude_shared_auth_enable | default(false) | bool
+    - (mickey_claude_shared_auth_probe.stdout | default('')) is search('present')
+
+- name: Reconcile the local Claude credentials with the shared copy
+  ansible.builtin.raw: |
+    set -eu
+    {{ mickey_claude_sync_script_path | quote }}
+  changed_when: false
+  when:
+    - mickey_claude_enable | default(false) | bool
+    - mickey_claude_shared_auth_enable | default(false) | bool
+
+- name: Restore a local Claude credentials file when shared auth is disabled
+  ansible.builtin.raw: |
+    set -eu
+    local_auth={{ mickey_claude_local_auth_path | quote }}
+    backup_auth={{ mickey_claude_local_auth_backup_path | quote }}
+    if [ -f "$local_auth" ] && [ ! -L "$local_auth" ]; then
+      exit 0
+    fi
+    restored=""
+    if [ -L "$local_auth" ]; then
+      target="$(readlink -f "$local_auth" 2>/dev/null || true)"
+      rm -f "$local_auth"
+      if [ -n "$target" ] && [ -f "$target" ]; then
+        cp -f "$target" "$local_auth"
+        restored=1
+      fi
+    fi
+    if [ -z "$restored" ] && [ -f "$backup_auth" ]; then
+      cp -f "$backup_auth" "$local_auth"
+      restored=1
+    fi
+    if [ -n "$restored" ]; then
+      chown {{ mickey_guest_admin_user | quote }}:{{ mickey_guest_admin_user | quote }} "$local_auth"
+      chmod 0600 "$local_auth"
+      echo changed
+    fi
+  register: mickey_claude_auth_restore_result
+  changed_when: "'changed' in mickey_claude_auth_restore_result.stdout"
+  when:
+    - mickey_claude_enable | default(false) | bool
+    - not (mickey_claude_shared_auth_enable | default(false) | bool)
+
+- name: Ensure the shared and host-private Claude skills directories exist
+  ansible.builtin.raw: |
+    set -eu
+    shared_parent="$(dirname {{ mickey_claude_shared_root | quote }})"
+    if [ ! -d "$shared_parent" ]; then
+      echo absent
+      exit 0
+    fi
+    for dir in {{ mickey_claude_shared_root | quote }} {{ mickey_claude_shared_skills_path | quote }} \
+      {{ mickey_claude_hosts_root | quote }} {{ (mickey_claude_hosts_root ~ '/' ~ inventory_hostname) | quote }} \
+      {{ mickey_claude_private_skills_path | quote }}; do
+      if [ ! -d "$dir" ]; then
+        mkdir -p "$dir"
+        chown {{ mickey_guest_admin_user | quote }}:{{ mickey_guest_admin_user | quote }} "$dir" || true
+        chmod 0770 "$dir" || true
+      fi
+    done
+    echo present
+  register: mickey_claude_shared_skills_probe
+  changed_when: false
+  when:
+    - mickey_claude_enable | default(false) | bool
+    - mickey_claude_shared_auth_enable | default(false) | bool
+
+- name: Compose the local Claude skills from shared and host-private skills
+  ansible.builtin.raw: |
+    set -eu
+    local_skills={{ (mickey_claude_config_dir ~ '/skills') | quote }}
+    shared_skills={{ mickey_claude_shared_skills_path | quote }}
+    private_skills={{ mickey_claude_private_skills_path | quote }}
+    install -d -m 0700 -o {{ mickey_guest_admin_user | quote }} -g {{ mickey_guest_admin_user | quote }} "$local_skills"
+    changed=0
+
+    for entry in "$local_skills"/*; do
+      [ -L "$entry" ] || continue
+      target="$(readlink "$entry")"
+      case "$target" in
+        "$shared_skills"/*|"$private_skills"/*)
+          if [ ! -e "$entry" ]; then
+            rm -f "$entry"
+            changed=1
+          fi
+          ;;
+      esac
+    done
+
+    for src_dir in "$shared_skills" "$private_skills"; do
+      [ -d "$src_dir" ] || continue
+      for skill in "$src_dir"/*; do
+        [ -e "$skill" ] || continue
+        name="$(basename "$skill")"
+        dest="$local_skills/$name"
+        if [ -L "$dest" ]; then
+          if [ "$(readlink "$dest")" != "$skill" ]; then
+            ln -sfn "$skill" "$dest"
+            changed=1
+          fi
+        elif [ ! -e "$dest" ]; then
+          ln -s "$skill" "$dest"
+          changed=1
+        fi
+      done
+    done
+
+    if [ "$changed" = "1" ]; then
+      echo changed
+    fi
+  register: mickey_claude_skills_result
+  changed_when: "'changed' in mickey_claude_skills_result.stdout"
+  when:
+    - mickey_claude_enable | default(false) | bool
+    - mickey_claude_shared_auth_enable | default(false) | bool
+    - (mickey_claude_shared_skills_probe.stdout | default('')) is search('present')

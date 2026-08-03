@@ -1,0 +1,25 @@
+#!/bin/sh
+# mickey-managed claude wrapper
+set -u
+
+export DISABLE_AUTOUPDATER=1
+
+sync_cmd={{ mickey_claude_sync_script_path | quote }}
+launcher={{ mickey_claude_launcher_path | quote }}
+
+{% if mickey_claude_shared_auth_enable | default(false) | bool %}
+if [ -x "$sync_cmd" ]; then
+  "$sync_cmd" || true
+fi
+{% endif %}
+
+"$launcher" "$@"
+status=$?
+
+{% if mickey_claude_shared_auth_enable | default(false) | bool %}
+if [ -x "$sync_cmd" ]; then
+  "$sync_cmd" || true
+fi
+{% endif %}
+
+exit "$status"
