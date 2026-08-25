@@ -1,4 +1,89 @@
 ---
+- name: Install the pinned Chrome DevTools MCP package
+  ansible.builtin.raw: |
+    set -eu
+    owner={{ mickey_guest_admin_user | quote }}
+    home={{ mickey_guest_admin_home | quote }}
+    package={{ mickey_codex_chrome_devtools_mcp_package | quote }}
+    version={{ mickey_codex_chrome_devtools_mcp_version | quote }}
+    install_root={{ mickey_codex_chrome_devtools_mcp_install_root | quote }}
+    install_dir={{ mickey_codex_chrome_devtools_mcp_install_dir | quote }}
+    package_json="$install_dir/node_modules/$package/package.json"
+    installed_bin="$install_dir/node_modules/.bin/chrome-devtools-mcp"
+    preferred_toolchain={{ mickey_codex_chrome_devtools_mcp_toolchain_path | quote }}
+    node_bin={{ (mickey_codex_local_bin_dir ~ '/node') | quote }}
+    npm_bin={{ (mickey_codex_local_bin_dir ~ '/npm') | quote }}
+    managed_path={{ (mickey_codex_local_bin_dir ~ ':/usr/local/bin:/usr/bin:/bin') | quote }}
+
+    case "$install_root" in
+      ''|/)
+        echo "refusing unsafe Chrome DevTools MCP install root: $install_root" >&2
+        exit 1
+        ;;
+    esac
+    expected_install_dir="${install_root%/}/$version"
+    if [ -z "$version" ] || [ "$install_dir" != "$expected_install_dir" ]; then
+      echo "refusing unexpected Chrome DevTools MCP install directory: $install_dir" >&2
+      exit 1
+    fi
+
+    run_as_admin() {
+      if [ "$owner" = root ]; then
+        env HOME="$home" PATH="$managed_path" "$@"
+      else
+        sudo -H -u "$owner" env PATH="$managed_path" "$@"
+      fi
+    }
+
+    run_node() {
+      if [ -x "$preferred_toolchain" ]; then
+        run_as_admin "$preferred_toolchain" node "$@"
+      else
+        run_as_admin "$node_bin" "$@"
+      fi
+    }
+
+    run_npm() {
+      if [ -x "$preferred_toolchain" ]; then
+        run_as_admin "$preferred_toolchain" npm "$@"
+      else
+        run_as_admin "$npm_bin" "$@"
+      fi
+    }
+
+    current_version="$(run_node -e 'try { console.log(require(process.argv[1]).version) } catch (_) {}' "$package_json" 2>/dev/null || true)"
+    if [ "$current_version" = "$version" ] && [ -x "$installed_bin" ]; then
+      exit 0
+    fi
+
+    install -d -m 0755 -o "$owner" -g "$owner" "$install_root"
+    candidate="$(mktemp -d "$install_root/.candidate.XXXXXX")"
+    trap '[ -z "$candidate" ] || rm -rf "$candidate"' EXIT
+    chown "$owner:$owner" "$candidate"
+
+    run_npm install \
+      --prefix "$candidate" \
+      --no-audit \
+      --no-fund \
+      --ignore-scripts \
+      --package-lock=false \
+      --no-save \
+      "$package@$version"
+
+    candidate_json="$candidate/node_modules/$package/package.json"
+    candidate_bin="$candidate/node_modules/.bin/chrome-devtools-mcp"
+    candidate_version="$(run_node -e 'console.log(require(process.argv[1]).version)' "$candidate_json")"
+    test "$candidate_version" = "$version"
+    test -x "$candidate_bin"
+
+    rm -rf "$install_dir"
+    mv "$candidate" "$install_dir"
+    candidate=""
+    chown -R "$owner:$owner" "$install_dir"
+    echo changed
+  register: mickey_chrome_devtools_mcp_package_result
+  changed_when: "'changed' in mickey_chrome_devtools_mcp_package_result.stdout"
+
 - name: Install the Chrome DevTools MCP launcher wrapper
   ansible.builtin.raw: |
     set -eu

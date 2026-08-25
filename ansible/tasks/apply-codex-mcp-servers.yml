@@ -48,6 +48,18 @@
         else:
             raise SystemExit("MCP server {} must define url or command".format(name))
 
+        startup_timeout = server.get("startup_timeout_sec")
+        if startup_timeout is not None:
+            if (
+                isinstance(startup_timeout, bool)
+                or not isinstance(startup_timeout, int)
+                or startup_timeout < 1
+            ):
+                raise SystemExit(
+                    "MCP server {} startup_timeout_sec must be a positive integer".format(name)
+                )
+            lines.append("startup_timeout_sec = {}".format(startup_timeout))
+
         block = "\n".join(lines) + "\n"
         pattern = re.compile(
             r"(?ms)^\[mcp_servers\.{}\]\n.*?(?=^\[|\Z)".format(re.escape(name))

@@ -140,15 +140,17 @@ mickey_codex_shared_skills_path: "{{ mickey_codex_shared_root }}/skills"
 mickey_codex_shared_auth_enable: true
 mickey_codex_chrome_devtools_mcp_wrapper_path: /usr/local/bin/mickey-chrome-devtools-mcp
 mickey_codex_chrome_devtools_mcp_toolchain_path: "{{ mickey_guest_admin_home }}/Projects/Acculase/tools/frontend-toolchain.sh"
+mickey_codex_chrome_devtools_mcp_package: chrome-devtools-mcp
+mickey_codex_chrome_devtools_mcp_version: "1.8.0"
+mickey_codex_chrome_devtools_mcp_install_root: "{{ mickey_guest_admin_home }}/.local/share/mickey-chrome-devtools-mcp"
+mickey_codex_chrome_devtools_mcp_install_dir: "{{ mickey_codex_chrome_devtools_mcp_install_root }}/{{ mickey_codex_chrome_devtools_mcp_version }}"
 mickey_codex_global_mcp_servers:
   - name: galvanic-ui
     url: http://galvanic-ui.mickey.galvanic.com/mcp
   - name: chrome-devtools
     command: "{{ mickey_codex_chrome_devtools_mcp_wrapper_path }}"
+    startup_timeout_sec: 60
     args:
-      - "npx"
-      - "-y"
-      - "chrome-devtools-mcp@latest"
       - "--headless"
       - "--no-usage-statistics"
       - "--executablePath=/usr/bin/google-chrome-stable"

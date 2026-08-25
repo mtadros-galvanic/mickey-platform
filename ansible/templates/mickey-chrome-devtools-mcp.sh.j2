@@ -2,28 +2,21 @@
 set -eu
 
 preferred_toolchain="${MICKEY_CHROME_DEVTOOLS_TOOLCHAIN:-{{ mickey_codex_chrome_devtools_mcp_toolchain_path }}}"
+installed_bin={{ (mickey_codex_chrome_devtools_mcp_install_dir ~ '/node_modules/.bin/chrome-devtools-mcp') | quote }}
+
+if [ ! -x "$installed_bin" ]; then
+  echo "the managed chrome-devtools-mcp {{ mickey_codex_chrome_devtools_mcp_version }} installation is missing" >&2
+  exit 1
+fi
 
 if [ -x "$preferred_toolchain" ]; then
-  exec "$preferred_toolchain" "$@"
-fi
-
-if [ "$#" -eq 0 ]; then
-  echo "usage: mickey-chrome-devtools-mcp npx -y chrome-devtools-mcp@latest [args...]" >&2
-  exit 2
-fi
-
-command_name="$1"
-shift
-
-if [ "$command_name" != "npx" ]; then
-  exec "$command_name" "$@"
+  exec "$preferred_toolchain" "$installed_bin" "$@"
 fi
 
 for bin_dir in "$HOME/.local/bin" /usr/local/bin /usr/bin; do
   node_bin="$bin_dir/node"
-  npx_bin="$bin_dir/npx"
 
-  if [ ! -x "$node_bin" ] || [ ! -x "$npx_bin" ]; then
+  if [ ! -x "$node_bin" ]; then
     continue
   fi
 
@@ -33,9 +26,9 @@ for bin_dir in "$HOME/.local/bin" /usr/local/bin /usr/bin; do
   esac
 
   if [ "$node_major" -ge 20 ]; then
-    PATH="$bin_dir:$PATH" exec "$npx_bin" "$@"
+    PATH="$bin_dir:$PATH" exec "$installed_bin" "$@"
   fi
 done
 
-echo "chrome-devtools-mcp requires Node 20 or newer; no suitable npx was found" >&2
+echo "chrome-devtools-mcp requires Node 20 or newer; no suitable runtime was found" >&2
 exit 1

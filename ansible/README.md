@@ -65,7 +65,7 @@ This directory owns the post-install host baseline and guest bootstrap for `mick
   - does not require the Samba or GitHub package secrets used by the full guest bootstraps
 - `playbooks/chrome-devtools-mcp.yml`
   - enforce pinned Chrome plus the shared `chrome-devtools` Codex MCP server entry on all generated `guest_vms`
-  - installs `/usr/local/bin/mickey-chrome-devtools-mcp` so Thud can use the Acculase Node toolchain while newer guests use the managed Node runtime
+  - installs a pinned local `chrome-devtools-mcp` package and `/usr/local/bin/mickey-chrome-devtools-mcp`, so MCP startup never resolves `@latest`; Thud uses the Acculase Node toolchain while newer guests use the managed Node runtime
 - `playbooks/site.yml`
   - imports the normal Proxmox, infra, and ERP baselines
   - does not run the build guest playbooks automatically because `mickey-thud`, `mickey-scarthgap`, and `mickey-brimstone` are operated explicitly
