@@ -7,6 +7,13 @@ case "${CODEX_HOME:-}" in
     ;;
 esac
 
+mcp_env_file={{ mickey_codex_mcp_env_path | quote }}
+if [ -r "$mcp_env_file" ]; then
+  set -a
+  . "$mcp_env_file"
+  set +a
+fi
+
 sync_cmd={{ mickey_codex_sync_script_path | quote }}
 real_codex={{ mickey_codex_real_bin_path | quote }}
 

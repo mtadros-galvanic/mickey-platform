@@ -68,6 +68,10 @@ vms = {
       },
       {
         host = "1a86:7523"
+      },
+      {
+        host = "2357:0601"
+        usb3 = true
       }
     ]
     started = false

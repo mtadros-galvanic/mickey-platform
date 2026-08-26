@@ -118,6 +118,7 @@ mickey_codex_legacy_tmp_mount_path: "{{ mickey_codex_legacy_shared_root }}/hosts
 mickey_codex_local_state_root: "{{ mickey_guest_admin_home }}/.local/state/codex"
 mickey_codex_local_home: "{{ mickey_codex_local_state_root }}/home"
 mickey_codex_local_tmp_path: "{{ mickey_codex_local_state_root }}/tmp"
+mickey_codex_mcp_env_path: "{{ mickey_guest_admin_home }}/.config/galvanic-ui/mcp.env"
 mickey_codex_tmp_mount_path: "{{ mickey_codex_local_home }}/tmp"
 mickey_codex_shared_tmp_mount_path: "{{ mickey_codex_shared_host_home }}/tmp"
 mickey_codex_local_auth_path: "{{ mickey_codex_local_home }}/auth.json"

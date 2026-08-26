@@ -1,0 +1,73 @@
+vars: {
+  d2-config: {
+    theme-id: 300
+    layout-engine: elk
+    pad: 28
+  }
+}
+
+direction: down
+
+lan: "Mickey LAN\n10.25.1.0/24 · gateway 10.25.1.1" {
+  shape: cloud
+}
+
+pve: "mickey-pve · Proxmox node\n10.25.1.207 · vmbr0" {
+  direction: right
+
+  storage: "Physical / Proxmox storage" {
+    direction: down
+
+    local_lvm: "local-lvm\nNVMe-backed fast VM disks" {
+      shape: cylinder
+    }
+    bulk: "bulk\n4 TB HDD · images / backup / ISO / templates" {
+      shape: cylinder
+    }
+    fast_nvme: "Kingston NVMe\nphysical passthrough for fast shared data" {
+      shape: cylinder
+      style.stroke-dash: 4
+    }
+    share_disk: "Existing 2 TiB share disk\nmanual cutover attachment" {
+      shape: cylinder
+      style.stroke-dash: 4
+    }
+  }
+
+  guests: "Guest fleet" {
+    direction: down
+
+    platform: "Platform / application" {
+      infra: "700 · mickey-infra\nUbuntu 24 · 10.25.1.206"
+      erp: "701 · mickey-erp\nUbuntu 24 · 10.25.1.208"
+      website: "710 · mickey-galvanic-website\nUbuntu 26 · DHCP (last generated: .143)"
+    }
+
+    builds: "Yocto / product build fleet" {
+      thud: "702 · mickey-thud\nUbuntu 18 · 10.25.1.199"
+      scarthgap: "704 · mickey-scarthgap\nUbuntu 22 · 10.25.1.210"
+      brimstone: "709 · mickey-brimstone\nUbuntu 22 · 10.25.1.190"
+    }
+
+    utilities: "Utility fleet" {
+      at4: "706 · mickey-at4\nUbuntu 26 · 10.25.1.211"
+      tmp: "707 · mickey-tmp\nUbuntu 26 · 10.25.1.212"
+      controller: "708 · mickey-controller\nUbuntu 26 · 10.25.1.214"
+    }
+
+    manual: "Manual legacy guest" {
+      ise7: "703 · mickey-ise7\nWindows 7 · Xilinx ISE 14.7" {
+        style.stroke-dash: 4
+      }
+    }
+  }
+
+  storage.local_lvm -> guests.platform: "OS disks for infra / ERP / website"
+  storage.local_lvm -> guests.utilities: "50 GB OS disks"
+  storage.bulk -> guests.builds: "400–500 GB build OS disks"
+  storage.bulk -> guests.manual.ise7: "imported legacy disk"
+  storage.share_disk -> guests.platform.infra: "/srv/share"
+  storage.fast_nvme -> guests.platform.infra: "/srv/mickey-shared-fast"
+}
+
+lan -> pve: "one bridged LAN via vmbr0"

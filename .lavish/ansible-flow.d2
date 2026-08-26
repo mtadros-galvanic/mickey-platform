@@ -1,0 +1,78 @@
+vars: {
+  d2-config: {
+    theme-id: 300
+    layout-engine: elk
+    pad: 28
+  }
+}
+
+direction: right
+
+operator: "Operator" {
+  shape: person
+}
+
+entry: "Make targets" {
+  shape: package
+}
+
+secrets: "secrets/prod.sops.yaml\nSOPS-encrypted" {
+  shape: page
+}
+
+terraform: "Terraform" {
+  direction: down
+  tfvars: "envs/prod/terraform.tfvars\nVM declarations"
+  provider: "bpg/proxmox provider\nclone + hardware + cloud-init"
+  generated: "hosts.generated.yml\nrole groups + resolved guest IPs" {
+    shape: page
+  }
+}
+
+static_inv: "hosts.yml\nstatic mickey-pve inventory" {
+  shape: page
+}
+
+wrapper: "scripts/run-ansible.sh" {
+  direction: down
+  decrypt: "decrypt SOPS to a temporary YAML file"
+  inventories: "load static + generated inventories"
+  launch: "ansible-playbook\npass secret_vars_file"
+}
+
+ansible: "Ansible composition" {
+  direction: down
+  groups: "group_vars\nall + role + consul membership"
+  playbook: "role playbook\nexact host or inventory group"
+  base: "bootstrap-vm-base.yml\npackages · Chrome · gh · Herdr · D2 · user · hostname"
+  role_tasks: "role-specific tasks\nshares · Docker · Yocto · website · host storage"
+  admin: "configure-vm-admin-tooling.yml\nConsul · Codex · Claude · dotfiles · auth · tools depot"
+}
+
+targets: "Managed targets" {
+  direction: down
+  pve: "mickey-pve"
+  linux: "9 Terraform Linux guests"
+  excluded: "mickey-ise7\nmanual guest; no normal Ansible bootstrap" {
+    style.stroke-dash: 4
+  }
+}
+
+operator -> entry: "make tf-* / make ansible-*"
+entry -> terraform: "tf-init · tf-plan · tf-apply"
+secrets -> terraform: "API token + guest bootstrap values"
+terraform.tfvars -> terraform.provider
+terraform.provider -> terraform.generated: "write after graph resolves"
+entry -> wrapper: "selected playbook + inventory paths"
+secrets -> wrapper.decrypt
+static_inv -> wrapper.inventories
+terraform.generated -> wrapper.inventories
+wrapper.decrypt -> wrapper.launch
+wrapper.inventories -> wrapper.launch
+wrapper.launch -> ansible.groups
+ansible.groups -> ansible.playbook
+ansible.playbook -> ansible.base
+ansible.base -> ansible.role_tasks
+ansible.role_tasks -> ansible.admin
+ansible.admin -> targets.pve: "host playbook has its own path"
+ansible.admin -> targets.linux: "SSH as galvanic; become root"

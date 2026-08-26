@@ -1,0 +1,52 @@
+vars: {
+  d2-config: {
+    theme-id: 300
+    layout-engine: elk
+    pad: 28
+  }
+}
+
+direction: right
+
+infra: "mickey-infra · 10.25.1.206" {
+  direction: down
+
+  samba: "Samba\n/srv/share → mickey-share"
+  fast: "Fast shared NFS\n/srv/mickey-shared-fast"
+  tools: "Persistent tools NFS (read-only)\n/srv/persistent-tools"
+  consul: "Consul server\nDocker · dc1 · :8500" {
+    shape: hexagon
+  }
+  traefik: "Traefik\nDocker + Consul Catalog" {
+    shape: hexagon
+  }
+  observe: "Observability\nGrafana · Prometheus · Loki · Alloy"
+
+  consul -> traefik: "catalog watched every 15 s"
+  traefik -> observe: "routes platform endpoints"
+}
+
+clients: "Consumers" {
+  direction: down
+
+  pve: "mickey-pve\nSMB + fast NFS client"
+  linux: "Linux guest fleet\n/mnt/mickey-share\n/mnt/mickey-shared-fast\n/mnt/persistent-tools"
+  consul_clients: "Consul client guests\nERP · website · three build VMs" {
+    shape: package
+  }
+  apps: "Application repositories\nown service definitions" {
+    shape: package
+  }
+  users: "LAN users / wildcard DNS\n*.mickey.galvanic.com" {
+    shape: person
+  }
+}
+
+infra.samba -> clients.pve: "CIFS automount"
+infra.samba -> clients.linux: "CIFS / artifact exchange"
+infra.fast -> clients.pve: "NFSv4.2 automount"
+infra.fast -> clients.linux: "NFSv4.2 · shared Codex / pnpm data"
+infra.tools -> clients.linux: "read-only NFS tool depot"
+clients.apps -> clients.consul_clients: "drop service config under /etc/consul.d"
+clients.consul_clients -> infra.consul: "join + publish health / service catalog"
+clients.users -> infra.traefik: "HTTP routing"
