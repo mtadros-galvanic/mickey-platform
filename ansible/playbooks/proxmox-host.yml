@@ -50,7 +50,7 @@
 
     - name: Install packages required for the Proxmox host baseline
       ansible.builtin.apt:
-        name: "{{ mickey_proxmox_apt_packages }}"
+        name: "{{ mickey_proxmox_apt_packages + mickey_proxmox_graphics_packages }}"
         state: present
         update_cache: true
 

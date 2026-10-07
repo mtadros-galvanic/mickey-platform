@@ -15,6 +15,13 @@ mickey_proxmox_apt_packages:
   - util-linux
   - xz-utils
 
+mickey_proxmox_graphics_packages:
+  - libegl1
+  - libegl-mesa0
+  - libgl1
+  - libgl1-mesa-dri
+  - libvirglrenderer1
+
 mickey_bulk_disk_device: /dev/sda
 mickey_bulk_disk_expected_model: ST4000DM004-2U9104
 mickey_bulk_partition_number: 1

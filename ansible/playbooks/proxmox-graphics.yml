@@ -1,0 +1,12 @@
+---
+- name: Install Proxmox GPU rendering prerequisites
+  hosts: proxmox_hosts
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Install libraries for VirtIO GPU OpenGL acceleration
+      ansible.builtin.apt:
+        name: "{{ mickey_proxmox_graphics_packages }}"
+        state: present
+        update_cache: true
+        cache_valid_time: 3600

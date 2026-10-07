@@ -106,3 +106,18 @@ The host baseline is intentionally guarded. It verifies that `/dev/sda` matches 
 
 See [docs/architecture.md](docs/architecture.md) for the design intent and operational boundaries.
 See [docs/windows-7-ise.md](docs/windows-7-ise.md) for the Windows 7 import and post-boot runbook.
+
+## Mickey Dev graphics and RAM priority
+
+`make ansible-graphics` installs only the host libraries needed by VirGL; it does
+not run the storage or share baseline. The package list is
+`mickey_proxmox_graphics_packages` in inventory group variables, mirrored in
+`ansible/group_vars/proxmox_hosts.yml`, and is also consumed by the host baseline.
+Only Mickey Dev (VM 711) enables `virtio-gl`; its VM definition and state remain
+in the separate `omarchy-remote-desktop/provision/mickey` directory. A cold VM
+restart is required to change its virtual GPU.
+
+Infra and Website retain 16 GiB maximum RAM with 8 GiB ballooning floors. Mickey
+Dev reserves 16 GiB so the interactive desktop is not ballooned down. Existing
+VMs' live settings must be compared with a saved Terraform plan before applying
+these changes; do not apply unrelated drift or stop service VMs to free RAM.

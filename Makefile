@@ -7,7 +7,7 @@ WIPE_CONFIRM ?= false
 HOST_ANSIBLE_EXTRA_VARS ?=
 REIP_APPLY ?= 0
 
-.PHONY: templates templates-bionic templates-jammy templates-resolute proxmox-reip tf-init tf-plan tf-apply ansible-host ansible-infra ansible-erp ansible-utility ansible-website ansible-claude ansible-control ansible-desktop ansible-build ansible-build-thud ansible-build-scarthgap ansible-build-brimstone ansible-google-chrome ansible-chrome-devtools-mcp ise7-import
+.PHONY: ansible-graphics templates templates-bionic templates-jammy templates-resolute proxmox-reip tf-init tf-plan tf-apply ansible-host ansible-infra ansible-erp ansible-utility ansible-website ansible-claude ansible-control ansible-desktop ansible-build ansible-build-thud ansible-build-scarthgap ansible-build-brimstone ansible-google-chrome ansible-chrome-devtools-mcp ise7-import
 
 templates:
 	BUILD_DESKTOP_TEMPLATE=0 "$(ROOT)scripts/build-proxmox-templates.sh"
@@ -44,6 +44,9 @@ tf-plan:
 
 tf-apply:
 	"$(ROOT)scripts/run-terraform.sh" apply
+
+ansible-graphics:
+	ANSIBLE_HOST_KEY_CHECKING=True ANSIBLE_CONFIG="$(ROOT)ansible/ansible.cfg" ansible-playbook -i "$(ANSIBLE_BASE_INVENTORY)" "$(ROOT)ansible/playbooks/proxmox-graphics.yml"
 
 ansible-host:
 	ANSIBLE_EXTRA_VARS="mickey_bulk_disk_wipe_confirm=$(WIPE_CONFIRM) $(HOST_ANSIBLE_EXTRA_VARS)" "$(ROOT)scripts/run-ansible.sh" "$(ROOT)ansible/playbooks/proxmox-host.yml" "$(ANSIBLE_BASE_INVENTORY)"
